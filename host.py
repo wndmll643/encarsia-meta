@@ -36,6 +36,7 @@ class Host:
         self.create_cascade_receptor()
         self.create_difuzzrtl_receptor()
         self.create_processorfuzz_receptor()
+        self.create_hierfuzz_receptor()
 
     def create_reference(self):
         self.reference_path = os.path.join(self.directory, "reference.v")
@@ -214,6 +215,18 @@ class Host:
             )
             with open(self.processorfuzz_receptor, 'w') as processorfuzz_receptor_file:
                 processorfuzz_receptor_file.write(processorfuzz_receptor)
+
+    def create_hierfuzz_receptor(self):
+        self.hierfuzz_receptor = os.path.join(self.directory, "hierfuzz_receptor.v")
+        if not os.path.exists(self.hierfuzz_receptor) and self.config.hierfuzz_receptor_sources:
+            hierfuzz_receptor = re.sub(
+                pattern=r'\bmodule\s+' + self.config.host_module + r'\b.*?\bendmodule\b',
+                repl="",
+                string="\n".join(open(source, 'r').read() for source in self.config.hierfuzz_receptor_sources),
+                flags=re.MULTILINE | re.DOTALL
+            )
+            with open(self.hierfuzz_receptor, 'w') as hierfuzz_receptor_file:
+                hierfuzz_receptor_file.write(hierfuzz_receptor)
 
     def inject(self):
         self.inject_multiplexer_log = os.path.join(self.directory, "inject_multiplexer.log")

@@ -21,13 +21,15 @@ class EncarsiaConfig:
         instruction_signal: str,
         cascade_directory: str,
         cascade_executable: str,
-        difuzzrtl_toplevel: str
+        difuzzrtl_toplevel: str,
+        hierfuzz_receptor_sources: list[str] = None
     ):
         # paths
         self.reference_sources = reference_sources
         self.cascade_receptor_sources = cascade_receptor_sources
         self.difuzzrtl_receptor_sources = difuzzrtl_receptor_sources
         self.processorfuzz_receptor_sources = processorfuzz_receptor_sources
+        self.hierfuzz_receptor_sources = hierfuzz_receptor_sources or []
 
         # injection
         self.host_module = host_module
@@ -88,7 +90,10 @@ rocket_config = EncarsiaConfig(
     instruction_signal = "io_imem_resp_bits_data",
     cascade_directory = os.path.abspath("/cascade-chipyard/cascade-rocket"),
     cascade_executable = "Vtop_tiny_soc",
-    difuzzrtl_toplevel = "RocketTile"
+    difuzzrtl_toplevel = "RocketTile",
+    hierfuzz_receptor_sources = [
+        os.path.abspath("/encarsia-difuzz-rtl/Benchmarks/Verilog/RocketTile_encarsia.v")
+    ]
 )
 
 boom_config = EncarsiaConfig(
@@ -125,7 +130,10 @@ boom_config = EncarsiaConfig(
     instruction_signal = "io_ifu_fetchpacket_bits_uops_0_bits_inst",
     cascade_directory = os.path.abspath("/cascade-chipyard/cascade-boom"),
     cascade_executable = "Vtop_tiny_soc",
-    difuzzrtl_toplevel = "BoomTile"
+    difuzzrtl_toplevel = "BoomTile",
+    hierfuzz_receptor_sources = [
+        os.path.abspath("/encarsia-difuzz-rtl/Benchmarks/Verilog/SmallBoomTile_encarsia.v")
+    ]
 )
 
 cva6_config = EncarsiaConfig(
