@@ -18,6 +18,7 @@ class Bug:
         self.directory = os.path.join(host.driver_directory if driver else host.mux_directory, name)
 
     def prepare(self):
+        # Prepare plain RTLIL — used by all fuzzers (including hierfuzz via Yosys pass)
         if not os.path.exists(os.path.join(self.directory, "host.rtlil")):
             subprocess.run(
                 [defines.YOSYS_PATH, '-c', self.host.prepare_driver if self.driver else self.host.prepare_multiplexer],
@@ -25,6 +26,7 @@ class Bug:
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
             )
+
         return self
     
     def create_miter(self):

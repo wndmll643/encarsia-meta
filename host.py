@@ -4,11 +4,99 @@
 
 import os
 import re
+import shutil
 import subprocess
 import datetime
 
 import defines
 import config
+
+
+def _preprocess_verilog_for_yosys(content: str, output_path: str):
+    """Remove unsynthesizable code from DifuzzRTL receptors for Yosys.
+
+    Removes: `ifdef MULTICORE blocks, initial blocks, always blocks with system tasks.
+    Preserves: all `ifdef/`endif balance, module/endmodule structure.
+    """
+    SYSTASKS = ['$fwrite', '$fopen', '$fclose', '$display', '$fdisplay',
+                '$value$plusargs', '$readmemh', '$sformatf']
+    lines = content.split('\n')
+    result = []
+    i = 0
+
+    def count_begin_end(s):
+        return len(re.findall(r'\bbegin\b', s)), len(re.findall(r'\bend\b', s))
+
+    def skip_block(start):
+        """Skip a begin/end block starting at line `start`. Return next line index.
+        Preserves `ifdef/`endif directives to maintain balance."""
+        s = lines[start].strip()
+        opens, closes = count_begin_end(s)
+        depth = opens - closes
+        j = start + 1
+        while j < len(lines) and depth > 0:
+            s = lines[j].strip()
+            o, c = count_begin_end(s)
+            depth += o - c
+            # Preserve preprocessor directives
+            if re.match(r'\s*`(ifdef|ifndef|else|endif)\b', s):
+                result.append(lines[j])
+            j += 1
+        return j
+
+    def skip_ifdef_block(start):
+        """Skip an `ifdef block. Return next line index."""
+        depth = 1
+        j = start + 1
+        while j < len(lines) and depth > 0:
+            s = lines[j].strip()
+            if re.match(r'\s*`(ifdef|ifndef)\b', s):
+                depth += 1
+            elif re.match(r'\s*`endif\b', s):
+                depth -= 1
+            j += 1
+        return j
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Skip `ifdef MULTICORE blocks entirely
+        if re.match(r'\s*`ifdef\s+MULTICORE\b', stripped):
+            i = skip_ifdef_block(i)
+            continue
+
+        # Skip initial begin blocks
+        if re.match(r'\s*initial\s+begin\b', stripped):
+            i = skip_block(i)
+            continue
+
+        # Skip always blocks containing system tasks
+        if re.match(r'\s*always\s+@', stripped) and 'begin' in stripped:
+            # Look ahead to collect the block and check for system tasks
+            s = stripped
+            depth = count_begin_end(s)[0] - count_begin_end(s)[1]
+            j = i + 1
+            while j < len(lines) and depth > 0:
+                s = lines[j].strip()
+                o, c = count_begin_end(s)
+                depth += o - c
+                j += 1
+            block_text = '\n'.join(lines[i:j])
+            if any(t in block_text for t in SYSTASKS):
+                # Skip this always block, preserving ifdefs
+                for k in range(i, j):
+                    if re.match(r'\s*`(ifdef|ifndef|else|endif)\b', lines[k].strip()):
+                        result.append(lines[k])
+                i = j
+                continue
+
+        result.append(line)
+        i += 1
+
+    with open(output_path, 'w') as f:
+        f.write('\n'.join(result))
+
 
 class Host:
     def __init__(self, out_directory: str, name: str):
@@ -37,8 +125,10 @@ class Host:
         self.create_difuzzrtl_receptor()
         self.create_processorfuzz_receptor()
         self.create_hierfuzz_receptor()
+        self.create_hierfuzz_export_script()
 
     def create_reference(self):
+        # Always plain — no hierCov. difuzzrtl/processorfuzz need a clean reference.
         self.reference_path = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference_path):
             reference = "\n".join(open(source, 'r').read() for source in self.config.reference_sources)
@@ -79,6 +169,8 @@ class Host:
             )
             with open(self.inject_multiplexer, 'w') as inject_multiplexer_file:
                 inject_multiplexer_file.write(inject_multiplexer)
+
+        # HierCov injection no longer needed — Yosys pass instruments plain RTLIL on the fly
 
     def create_prepare_scripts(self):
         self.prepare_driver = os.path.join(self.directory, "prepare_driver.tcl")
@@ -217,16 +309,113 @@ class Host:
                 processorfuzz_receptor_file.write(processorfuzz_receptor)
 
     def create_hierfuzz_receptor(self):
+        # Use self.reference_path (the same plain reference.v used for bug injection).
+        # This is clean FIRRTL->Verilog with correct config, no DifuzzRTL ports, no $paramod.
+        # Instrument with hierfuzz pass, then strip host module.
         self.hierfuzz_receptor = os.path.join(self.directory, "hierfuzz_receptor.v")
-        if not os.path.exists(self.hierfuzz_receptor) and self.config.hierfuzz_receptor_sources:
-            hierfuzz_receptor = re.sub(
+        if not os.path.exists(self.hierfuzz_receptor):
+            receptor_full = os.path.join(self.directory, "hierfuzz_receptor_full.v")
+            if not os.path.exists(receptor_full):
+                gen_script = os.path.join(self.directory, "gen_hierfuzz_receptor.tcl")
+                with open(gen_script, 'w') as f:
+                    f.write(f'yosys "read_verilog -sv -DSYNTHESIS {self.reference_path}"\n')
+                    f.write(f'yosys "hierarchy -check -top {self.config.difuzzrtl_toplevel}"\n')
+                    f.write(f'yosys "proc -norom"\n')
+                    f.write(f'yosys "hierfuzz_instrument_v6a"\n')
+                    f.write(f'yosys "write_verilog {receptor_full}"\n')
+                gen_log = os.path.join(self.directory, "gen_hierfuzz_receptor.log")
+                with open(gen_log, 'w') as log_file:
+                    subprocess.run(
+                        [defines.YOSYS_PATH, '-c', gen_script],
+                        check=True,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT
+                    )
+
+            receptor_content = open(receptor_full, 'r').read()
+            receptor_content = re.sub(
                 pattern=r'\bmodule\s+' + self.config.host_module + r'\b.*?\bendmodule\b',
                 repl="",
-                string="\n".join(open(source, 'r').read() for source in self.config.hierfuzz_receptor_sources),
+                string=receptor_content,
                 flags=re.MULTILINE | re.DOTALL
             )
-            with open(self.hierfuzz_receptor, 'w') as hierfuzz_receptor_file:
-                hierfuzz_receptor_file.write(hierfuzz_receptor)
+            with open(self.hierfuzz_receptor, 'w') as f:
+                f.write(receptor_content)
+
+        # Plain receptor for no_cov_hierfuzz — reference.v with host module stripped
+        self.hierfuzz_nocov_receptor = os.path.join(self.directory, "hierfuzz_nocov_receptor.v")
+        if not os.path.exists(self.hierfuzz_nocov_receptor):
+            nocov_content = open(self.reference_path, 'r').read()
+            nocov_content = re.sub(
+                pattern=r'\bmodule\s+' + self.config.host_module + r'\b.*?\bendmodule\b',
+                repl="",
+                string=nocov_content,
+                flags=re.MULTILINE | re.DOTALL
+            )
+            with open(self.hierfuzz_nocov_receptor, 'w') as f:
+                f.write(nocov_content)
+
+    def create_hierfuzz_export_script(self):
+        # v6a: instrument plain RTLIL with Yosys hierfuzz pass (no pre-built hierCov needed)
+        self.hierfuzz_v6a_export_script = os.path.join(self.directory, "hierfuzz_v6a_export.tcl")
+        if not os.path.exists(self.hierfuzz_v6a_export_script):
+            script = (
+                f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v6a"\n'
+                f'yosys "write_verilog host.v"\n'
+            )
+            with open(self.hierfuzz_v6a_export_script, 'w') as f:
+                f.write(script)
+
+        self.hierfuzz_v6a_ref_export = os.path.join(self.directory, "hierfuzz_v6a_ref_export.tcl")
+        if not os.path.exists(self.hierfuzz_v6a_ref_export):
+            script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v6a"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.hierfuzz_v6a_ref_export, 'w') as f:
+                f.write(script)
+
+        # v6b: same but with v6b pass
+        self.hierfuzz_v6b_export_script = os.path.join(self.directory, "hierfuzz_v6b_export.tcl")
+        if not os.path.exists(self.hierfuzz_v6b_export_script):
+            script = (
+                f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v6b"\n'
+                f'yosys "write_verilog host.v"\n'
+            )
+            with open(self.hierfuzz_v6b_export_script, 'w') as f:
+                f.write(script)
+
+        self.hierfuzz_v6b_ref_export = os.path.join(self.directory, "hierfuzz_v6b_ref_export.tcl")
+        if not os.path.exists(self.hierfuzz_v6b_ref_export):
+            script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v6b"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.hierfuzz_v6b_ref_export, 'w') as f:
+                f.write(script)
+
+        # no_cov: export plain RTLIL without any coverage instrumentation
+        self.hierfuzz_nocov_export_script = os.path.join(self.directory, "hierfuzz_nocov_export.tcl")
+        if not os.path.exists(self.hierfuzz_nocov_export_script):
+            script = (
+                f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "write_verilog host.v"\n'
+            )
+            with open(self.hierfuzz_nocov_export_script, 'w') as f:
+                f.write(script)
+
+        self.hierfuzz_nocov_ref_export = os.path.join(self.directory, "hierfuzz_nocov_ref_export.tcl")
+        if not os.path.exists(self.hierfuzz_nocov_ref_export):
+            script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.hierfuzz_nocov_ref_export, 'w') as f:
+                f.write(script)
 
     def inject(self):
         self.inject_multiplexer_log = os.path.join(self.directory, "inject_multiplexer.log")
@@ -257,3 +446,4 @@ class Host:
                 f.flush()
                 f.write(datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S-%f"))
                 f.flush()
+

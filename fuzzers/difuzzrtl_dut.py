@@ -136,7 +136,7 @@ class DifuzzRTLDUT():
             )
 
         return self
-    
+
     def check_mismatch(self):
         mismatch_inputs = os.listdir(os.path.join(self.out_directory, "mismatch", "sim_input"))
         self.check_summary = os.path.join(self.directory, "check_summary.log")

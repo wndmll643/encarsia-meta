@@ -19,30 +19,30 @@ class HierFuzzV6aDUT():
         self.env = os.environ.copy()
         self.env["SPIKE"] = "/encarsia-difuzz-rtl/Fuzzer/ISASim/riscv-isa-sim/build/spike"
         self.env["PYTHONPATH"] = (
-            f"{defines.HIERFUZZ_FUZZER}/.."
-            f":/encarsia-difuzz-rtl/Fuzzer"
+            f"{defines.HIERFUZZ_FUZZER}"
+            f":{defines.HIERFUZZ_FUZZER}/.."
             f":/encarsia-difuzz-rtl/Fuzzer/src"
             f":/encarsia-difuzz-rtl/Fuzzer/RTLSim/src"
         )
-        self.env["COCOTB_RESULTS_FILE"] = self.name
+        self.env["COCOTB_RESULTS_FILE"] = os.path.join(defines.HIERFUZZ_FUZZER, "cocotb_results", self.name)
+        self.compile_failed = False
 
     def create_dut(self):
+        # Use plain host.rtlil — Yosys hierfuzz_instrument_v6a pass adds coverage
+        host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
+        if not os.path.exists(host_rtlil):
+            self.compile_failed = True
+            print(f"Warning: skipping hierfuzz_v6a for bug {self.bug.name} (no host.rtlil)")
+            return self
+
         self.module = os.path.join(self.directory, "host.v")
         if not os.path.exists(self.module):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.instrument_script],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6a_export_script],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
             )
-
-        # Apply hierCov v6a instrumentation via firrtl2
-        self.instrumented = os.path.join(self.directory, "host_v6a.v")
-        if not os.path.exists(self.instrumented):
-            # Convert Yosys Verilog to FIRRTL is not feasible;
-            # instead, use the host.v directly (it already has io_covSum from Yosys instrument)
-            # and concatenate with receptor
-            pass
 
         self.dut_path = os.path.join(self.directory, "dut.v")
         if not os.path.exists(self.dut_path):
@@ -55,10 +55,12 @@ class HierFuzzV6aDUT():
         return self
 
     def create_reference(self):
+        if self.compile_failed:
+            return self
         self.reference = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.export_difuzzrtl_reference],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6a_ref_export],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -75,37 +77,47 @@ class HierFuzzV6aDUT():
         return self
 
     def compile_dut(self):
+        if self.compile_failed:
+            return self
         self.build_directory = os.path.join(self.directory, "build")
         self.out_directory = os.path.join(self.directory, "out")
 
         if not os.path.exists(self.out_directory):
-            subprocess.run(
-                [
-                    "make",
-                    f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
-                    f"VERILOG_SOURCES={self.dut_path}",
-                    f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
-                    f"NUM_ITER=1",
-                    f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
-                ],
-                check=True,
-                cwd=defines.HIERFUZZ_FUZZER,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=self.env
-            )
+            compile_log = os.path.join(self.directory, "compile_error.log")
+            with open(compile_log, 'w') as log_file:
+                subprocess.run(
+                    [
+                        "make",
+                        "MODULE=hierfuzz_entry",
+                        f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
+                        f"VERILOG_SOURCES={self.dut_path}",
+                        f"VERILOG_FILE={self.dut_path}",
+                        f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
+                        f"NUM_ITER=1",
+                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
+                    ],
+                    check=True,
+                    cwd=defines.HIERFUZZ_FUZZER,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    env=self.env
+                )
 
         return self
 
     def fuzz(self):
+        if self.compile_failed:
+            return self
         self.fuzz_log = os.path.join(self.directory, "fuzz.log")
         if not os.path.exists(self.fuzz_log):
             with open(self.fuzz_log, 'w') as fuzz_log:
                 process = subprocess.Popen(
                     [
                         "make",
+                        "MODULE=hierfuzz_entry",
                         f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
                         f"VERILOG_SOURCES={self.dut_path}",
+                        f"VERILOG_FILE={self.dut_path}",
                         f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
                         f"NUM_ITER=10000000",
                         f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
@@ -121,6 +133,8 @@ class HierFuzzV6aDUT():
         return self
 
     def compile_reference(self):
+        if self.compile_failed:
+            return self
         self.build_reference_directory = os.path.join(self.directory, "build_reference")
         self.out_reference_directory = os.path.join(self.directory, "out_reference")
 
@@ -128,8 +142,10 @@ class HierFuzzV6aDUT():
             subprocess.run(
                 [
                     "make",
+                    "MODULE=hierfuzz_entry",
                     f"SIM_BUILD={os.path.relpath(self.build_reference_directory, defines.HIERFUZZ_FUZZER)}",
                     f"VERILOG_SOURCES={self.reference_dut}",
+                    f"VERILOG_FILE={self.reference_dut}",
                     f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
                     f"NUM_ITER=1",
                     f"OUT={os.path.relpath(self.out_reference_directory, defines.HIERFUZZ_FUZZER)}"
@@ -144,6 +160,11 @@ class HierFuzzV6aDUT():
         return self
 
     def check_mismatch(self):
+        if self.compile_failed:
+            self.check_summary = os.path.join(self.directory, "check_summary.log")
+            with open(self.check_summary, 'w') as check_summary_file:
+                check_summary_file.write("NOT DETECTED")
+            return self
         mismatch_inputs = os.listdir(os.path.join(self.out_directory, "mismatch", "sim_input"))
         self.check_summary = os.path.join(self.directory, "check_summary.log")
 
@@ -156,8 +177,10 @@ class HierFuzzV6aDUT():
                 subprocess.run(
                     [
                         "make",
+                        "MODULE=hierfuzz_entry",
                         f"SIM_BUILD={os.path.relpath(self.build_reference_directory, defines.HIERFUZZ_FUZZER)}",
                         f"VERILOG_SOURCES={self.reference_dut}",
+                        f"VERILOG_FILE={self.reference_dut}",
                         f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
                         f"NUM_ITER=1",
                         f"OUT={os.path.relpath(self.out_reference_directory, defines.HIERFUZZ_FUZZER)}",
