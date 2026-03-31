@@ -1,3 +1,10 @@
+"""HierFuzz v6a with coverage-weighted corpus selection.
+
+Same coverage instrumentation as v6a, but the mutator preferentially
+selects corpus entries that discovered more new coverage points.
+Enabled via COV_WEIGHTED=1 env var passed to the fuzzer.
+"""
+
 import os
 import subprocess
 import random
@@ -9,9 +16,9 @@ from host import Host
 from bug import Bug
 
 
-class HierFuzzV6aDUT():
+class HierFuzzV6aCovWtDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v6a")
+        self.directory = os.path.join(bug.directory, "hierfuzz_v6a_covwt")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -28,11 +35,10 @@ class HierFuzzV6aDUT():
         self.compile_failed = False
 
     def create_dut(self):
-        # Use plain host.rtlil — Yosys hierfuzz_instrument_v6a pass adds coverage
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v6a for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_v6a_covwt for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
@@ -94,7 +100,8 @@ class HierFuzzV6aDUT():
                         f"VERILOG_FILE={self.dut_path}",
                         f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
                         f"NUM_ITER=1",
-                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
+                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}",
+                        f"COV_WEIGHTED=1"
                     ],
                     check=True,
                     cwd=defines.HIERFUZZ_FUZZER,
@@ -121,7 +128,8 @@ class HierFuzzV6aDUT():
                         f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
                         f"NUM_ITER=10000000",
                         f"RECORD=1",
-                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
+                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}",
+                        f"COV_WEIGHTED=1"
                     ],
                     cwd=defines.HIERFUZZ_FUZZER,
                     stdout=fuzz_log,

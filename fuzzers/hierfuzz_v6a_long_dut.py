@@ -8,10 +8,12 @@ import defines
 from host import Host
 from bug import Bug
 
+LONG_FUZZING_TIMEOUT = defines.FUZZING_TIMEOUT * 2  # 3600s = 1 hour
 
-class HierFuzzV6aDUT():
+
+class HierFuzzV6aLongDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v6a")
+        self.directory = os.path.join(bug.directory, "hierfuzz_v6a_long")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -28,11 +30,10 @@ class HierFuzzV6aDUT():
         self.compile_failed = False
 
     def create_dut(self):
-        # Use plain host.rtlil — Yosys hierfuzz_instrument_v6a pass adds coverage
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v6a for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_v6a_long for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
@@ -128,7 +129,7 @@ class HierFuzzV6aDUT():
                     stderr=subprocess.DEVNULL,
                     env=self.env
                 )
-                time.sleep(defines.FUZZING_TIMEOUT)
+                time.sleep(LONG_FUZZING_TIMEOUT)
                 process.terminate()
 
         return self

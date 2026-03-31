@@ -119,6 +119,7 @@ class HierFuzzV6bDUT():
                         f"VERILOG_FILE={self.dut_path}",
                         f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
                         f"NUM_ITER=10000000",
+                        f"RECORD=1",
                         f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
                     ],
                     cwd=defines.HIERFUZZ_FUZZER,

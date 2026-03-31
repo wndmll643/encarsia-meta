@@ -97,7 +97,9 @@ rocket_config = EncarsiaConfig(
     cascade_directory = os.path.abspath("/cascade-chipyard/cascade-rocket"),
     cascade_executable = "Vtop_tiny_soc",
     difuzzrtl_toplevel = "RocketTile",
-    hierfuzz_receptor_sources = [],  # empty = use cascade sources (works for Rocket)
+    hierfuzz_receptor_sources = [
+        os.path.abspath("/encarsia-difuzz-rtl/Benchmarks/Verilog/RocketTile_encarsia.v")
+    ],
     hiercov_reference = defines.HIERCOV_ROCKET_REF,
     hiercov_receptor = defines.HIERCOV_ROCKET_RECEPTOR
 )

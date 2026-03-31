@@ -309,30 +309,14 @@ class Host:
                 processorfuzz_receptor_file.write(processorfuzz_receptor)
 
     def create_hierfuzz_receptor(self):
-        # Use self.reference_path (the same plain reference.v used for bug injection).
-        # This is clean FIRRTL->Verilog with correct config, no DifuzzRTL ports, no $paramod.
-        # Instrument with hierfuzz pass, then strip host module.
+        # Use DifuzzRTL receptor directly (has auto_reset_vector_in, metaReset, io_covSum).
+        # No Yosys processing needed — the per-bug host.v has matching ports
+        # (io_covSum added as dummy zero by hierfuzz Yosys pass for compatibility).
         self.hierfuzz_receptor = os.path.join(self.directory, "hierfuzz_receptor.v")
         if not os.path.exists(self.hierfuzz_receptor):
-            receptor_full = os.path.join(self.directory, "hierfuzz_receptor_full.v")
-            if not os.path.exists(receptor_full):
-                gen_script = os.path.join(self.directory, "gen_hierfuzz_receptor.tcl")
-                with open(gen_script, 'w') as f:
-                    f.write(f'yosys "read_verilog -sv -DSYNTHESIS {self.reference_path}"\n')
-                    f.write(f'yosys "hierarchy -check -top {self.config.difuzzrtl_toplevel}"\n')
-                    f.write(f'yosys "proc -norom"\n')
-                    f.write(f'yosys "hierfuzz_instrument_v6a"\n')
-                    f.write(f'yosys "write_verilog {receptor_full}"\n')
-                gen_log = os.path.join(self.directory, "gen_hierfuzz_receptor.log")
-                with open(gen_log, 'w') as log_file:
-                    subprocess.run(
-                        [defines.YOSYS_PATH, '-c', gen_script],
-                        check=True,
-                        stdout=log_file,
-                        stderr=subprocess.STDOUT
-                    )
-
-            receptor_content = open(receptor_full, 'r').read()
+            receptor_content = "\n".join(
+                open(src, 'r').read() for src in self.config.hierfuzz_receptor_sources
+            )
             receptor_content = re.sub(
                 pattern=r'\bmodule\s+' + self.config.host_module + r'\b.*?\bendmodule\b',
                 repl="",
@@ -342,10 +326,12 @@ class Host:
             with open(self.hierfuzz_receptor, 'w') as f:
                 f.write(receptor_content)
 
-        # Plain receptor for no_cov_hierfuzz — reference.v with host module stripped
+        # Plain receptor for no_cov_hierfuzz — same DifuzzRTL receptor
         self.hierfuzz_nocov_receptor = os.path.join(self.directory, "hierfuzz_nocov_receptor.v")
         if not os.path.exists(self.hierfuzz_nocov_receptor):
-            nocov_content = open(self.reference_path, 'r').read()
+            nocov_content = "\n".join(
+                open(src, 'r').read() for src in self.config.difuzzrtl_receptor_sources
+            )
             nocov_content = re.sub(
                 pattern=r'\bmodule\s+' + self.config.host_module + r'\b.*?\bendmodule\b',
                 repl="",
@@ -398,11 +384,14 @@ class Host:
             with open(self.hierfuzz_v6b_ref_export, 'w') as f:
                 f.write(script)
 
-        # no_cov: export plain RTLIL without any coverage instrumentation
+        # no_cov: still instrument with hierfuzz_instrument_v6a for port compatibility
+        # with DifuzzRTL receptor (io_covSum, metaReset, metaAssert).
+        # Coverage guidance is disabled via NO_GUIDE=1 in the fuzzer, not by skipping the pass.
         self.hierfuzz_nocov_export_script = os.path.join(self.directory, "hierfuzz_nocov_export.tcl")
         if not os.path.exists(self.hierfuzz_nocov_export_script):
             script = (
                 f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v6a"\n'
                 f'yosys "write_verilog host.v"\n'
             )
             with open(self.hierfuzz_nocov_export_script, 'w') as f:
@@ -412,9 +401,31 @@ class Host:
         if not os.path.exists(self.hierfuzz_nocov_ref_export):
             script = (
                 f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v6a"\n'
                 f'yosys "write_verilog reference.v"\n'
             )
             with open(self.hierfuzz_nocov_ref_export, 'w') as f:
+                f.write(script)
+
+        # v7: dynamic hash sizing + extmodule proxy + raised caps
+        self.hierfuzz_v7_export_script = os.path.join(self.directory, "hierfuzz_v7_export.tcl")
+        if not os.path.exists(self.hierfuzz_v7_export_script):
+            script = (
+                f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v7"\n'
+                f'yosys "write_verilog host.v"\n'
+            )
+            with open(self.hierfuzz_v7_export_script, 'w') as f:
+                f.write(script)
+
+        self.hierfuzz_v7_ref_export = os.path.join(self.directory, "hierfuzz_v7_ref_export.tcl")
+        if not os.path.exists(self.hierfuzz_v7_ref_export):
+            script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v7"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.hierfuzz_v7_ref_export, 'w') as f:
                 f.write(script)
 
     def inject(self):
