@@ -2,162 +2,157 @@
 
 ## Overview
 
-This guide covers how to run HierFuzz with **true hierarchical coverage** (`io_hierCovSum` / `io_hierCovHash`) in Encarsia, replacing the old Yosys `difuzzrtl_instrument` register coverage.
+This guide covers how to run **HierFuzz** (with hierarchical coverage) in Encarsia, replacing the original DifuzzRTL register-coverage flow.
 
-The approach: generate hierCov-instrumented Verilog **locally** via firrtl2, then mount it into the Docker container. Yosys bug injection preserves the hierCov ports through the pipeline.
+The key idea: HierFuzz instrumentation is added to each per-bug RTLIL by an **encarsia-yosys plugin pass** (`hierfuzz_instrument_v6a` / `_v6b` / `_v9a` / ...), then the instrumented host module is concatenated with a DifuzzRTL benchmark wrapper (with the original host module stripped out) to form `dut.v`. The cocotb harness in `hierfuzz/` reads `io_hierCovSum` for coverage feedback.
+
+There is **no firrtl2 pre-generation step**. Everything happens at the Yosys/RTLIL level inside the Encarsia container.
 
 ## Prerequisites
 
 - `encarsia` Docker container image (`ethcomsec/encarsia-artifacts:latest`)
-- firrtl2 built locally (`firrtl2/utils/bin/firrtl`)
-- Environment set up: `source ./env.sh`
+- The encarsia-yosys plugin built into the image (already shipped — exposes `hierfuzz_instrument_v6a`, `_v6b`, `_v7`, `_v7b`, `_v8a`, `_v8b`, `_v9a`, `_v9b`, `_v9c`, `_v9d`)
+- The `encarsia-meta/`, `hierfuzz/`, and `hierfuzz/infos/` directories from this repo (mounted into the container)
 
-## Step 1: Start the Encarsia container (temporary)
-
-You need the container running briefly to copy out the FIRRTL source files.
-
-```bash
-docker run -it --name encarsia ethcomsec/encarsia-artifacts:latest
-```
-
-Leave it running (or start it detached with `-d`).
-
-## Step 2: Generate hierCov Verilog locally
-
-```bash
-source ./env.sh
-bash encarsia-meta/gen_hiercov.sh
-```
-
-This script:
-1. Copies `.top.fir` files from the Docker container (Rocket + BOOM)
-2. Converts FIRRTL 3 syntax to FIRRTL 1.2 (`scripts/firrtl3_to_1.py`)
-3. Lowers to Low FIRRTL via firrtl2
-4. Applies `hier_cov.hierCoverage_v6a` pass, emitting instrumented Verilog
-5. Generates receptor files (hierCov Verilog with host module stripped)
-
-Output goes to `hiercov_build/`:
-```
-hiercov_build/
-  rocket_hiercov_v6a.v          # Rocket with hierCov ports
-  rocket_hiercov_receptor.v     # RocketTile wrapper (Rocket stripped)
-  boom_hiercov_v6a.v            # BOOM with hierCov ports
-  boom_hiercov_receptor.v       # BoomTile wrapper (BoomCore stripped)
-```
-
-### Verify the output
-
-```bash
-grep -c 'io_hierCovSum' hiercov_build/rocket_hiercov_v6a.v
-grep -c 'io_hierCovHash' hiercov_build/rocket_hiercov_v6a.v
-```
-
-Both should return non-zero counts.
-
-## Step 3: Stop the temporary container
-
-```bash
-docker stop encarsia
-docker rm encarsia
-```
-
-## Step 4: Restart with mounts
+## Step 1: Start the Encarsia container with mounts
 
 ```bash
 docker run -it --name encarsia \
   -v $(pwd)/encarsia-meta:/encarsia-meta \
   -v $(pwd)/hierfuzz:/encarsia-hierfuzz/hierfuzz \
-  -v $(pwd)/hiercov_build:/encarsia-hierfuzz/hiercov_build \
   ethcomsec/encarsia-artifacts:latest
 ```
 
-The three mounts:
 | Host path | Container path | Purpose |
-|-----------|---------------|---------|
-| `encarsia-meta/` | `/encarsia-meta` | Encarsia orchestration scripts |
-| `hierfuzz/` | `/encarsia-hierfuzz/hierfuzz` | HierFuzz fuzzer code |
-| `hiercov_build/` | `/encarsia-hierfuzz/hiercov_build` | Pre-generated hierCov Verilog + receptors |
+|-----------|----------------|---------|
+| `encarsia-meta/` | `/encarsia-meta` | Encarsia orchestration scripts (this directory) |
+| `hierfuzz/` | `/encarsia-hierfuzz/hierfuzz` | HierFuzz cocotb harness + Makefile |
 
-## Step 5: Run a single-bug test
+If you want to run experiments without an interactive shell:
 
-Inside the container:
+```bash
+docker run -d --name encarsia \
+  -v $(pwd)/encarsia-meta:/encarsia-meta \
+  -v $(pwd)/hierfuzz:/encarsia-hierfuzz/hierfuzz \
+  ethcomsec/encarsia-artifacts:latest \
+  sleep infinity
+docker exec -it encarsia bash
+```
+
+## Step 2: Run a single-bug smoke test (inside the container)
 
 ```bash
 cd /encarsia-meta
-python encarsia.py -d out/test -H rocket -p 1 -D 1 -F hierfuzz_v6a
-```
-
-## Step 6: Verify hierCov is active
-
-Check that the exported `host.v` contains hierCov ports (not just `io_covSum`):
-
-```bash
-grep 'io_hierCovSum' out/test/rocket/driver/1/hierfuzz_v6a/host.v
-```
-
-If this returns matches, hierarchical coverage is working.
-
-## Step 7: Run a full coverage comparison
-
-To compare all coverage metrics (matching the EnCorpus benchmark style), run all fuzzers together:
-
-```bash
-cd /encarsia-meta
-python encarsia.py -d out/EnCorpus -H rocket boom -p 30 -F difuzzrtl processorfuzz hierfuzz_v6a hierfuzz_v6b no_cov_hierfuzz
+python encarsia.py -d out/test -H rocket -p 1 -D 1 -F hierfuzz_v9a
 ```
 
 | Flag | Meaning |
 |------|---------|
-| `-d out/EnCorpus` | Output directory for all results |
-| `-H rocket boom` | Run on both Rocket and BOOM host designs |
-| `-p 30` | 30 parallel processes |
-| `-F ...` | Fuzzers to evaluate (all run on each host) |
+| `-d out/test` | Output directory for results |
+| `-H rocket` | Host design (rocket / boom / cva6 / ibex — HierFuzz only supports rocket and boom) |
+| `-p 1` | One process |
+| `-D 1` | One driver bug |
+| `-F hierfuzz_v9a` | Fuzzer to evaluate |
 
-Fuzzers in the comparison:
-- `difuzzrtl` — register coverage baseline (DifuzzRTL)
-- `processorfuzz` — ProcessorFuzz baseline
-- `hierfuzz_v6a` — HierFuzz with hierarchical coverage v6a
-- `hierfuzz_v6b` — HierFuzz with hierarchical coverage v6b
-- `no_cov_hierfuzz` — HierFuzz random baseline (`NO_GUIDE=1`, same harness, no coverage feedback)
-
-For a quick single-host smoke test:
+Verify the per-bug `host.v` got hierCov ports added:
 
 ```bash
-python encarsia.py -d out/test -H rocket -p 4 -F difuzzrtl hierfuzz_v6a hierfuzz_v6b
+grep -c io_hierCovSum  out/test/rocket/driver/1/hierfuzz_v9a/host.v
+grep -c io_hierCovHash out/test/rocket/driver/1/hierfuzz_v9a/host.v
 ```
+
+Both should return non-zero counts.
+
+## Step 3: Run a full coverage comparison
+
+To compare the current best HierFuzz variants against the DifuzzRTL / ProcessorFuzz baselines (matches the EnCorpus benchmark style):
+
+```bash
+cd /encarsia-meta
+python encarsia.py \
+  -d out/EnCorpus \
+  -H rocket boom \
+  -p 30 \
+  -F difuzzrtl processorfuzz hierfuzz_v6a hierfuzz_v6b hierfuzz_v9a no_cov_hierfuzz
+```
+
+Available HierFuzz fuzzers (current best variants in **bold**):
+
+- **`hierfuzz_v6a`** — data-input hash + ctrl-reg core hash
+- **`hierfuzz_v6b`** — ctrl-input hash + ctrl-reg core hash
+- **`hierfuzz_v9a`** — newest hierCov variant
+- `hierfuzz_v7`, `hierfuzz_v6a_long`, `hierfuzz_v6a_pfuzz`, `hierfuzz_v6a_covwt` — experimental, currently being evaluated
+- `no_cov_hierfuzz` — random baseline (`NO_GUIDE=1`, same harness, no coverage feedback)
+
+For a quick subset:
+
+```bash
+python encarsia.py -d out/test -H rocket -p 4 -F difuzzrtl hierfuzz_v6a hierfuzz_v9a
+```
+
+## How it actually works
+
+For each bug, Encarsia produces `host.rtlil` (the buggy host module) and `reference.rtlil` (the bug-free reference) in the per-bug directory. Then for each HierFuzz variant the orchestration in `host.py` generates a Yosys TCL export script:
+
+```tcl
+yosys "read_rtlil ../host.rtlil"
+yosys "hierfuzz_instrument_v9a"
+yosys "write_verilog host.v"
+```
+
+Running it produces a `host.v` with `io_hierCovSum`, `io_hierCovHash`, `metaAssert`, `metaReset` ports added to every module.
+
+`fuzzers/hierfuzz_v9a_dut.py` then:
+
+1. Runs the Yosys export to get `host.v`
+2. Builds `dut.v` by concatenating the **DifuzzRTL benchmark wrapper** (`/encarsia-difuzz-rtl/Benchmarks/Verilog/RocketTile_encarsia.v` or `SmallBoomTile_encarsia.v`) — with the original host module regex-stripped — and the freshly instrumented `host.v`
+3. Drives `make -C /encarsia-hierfuzz/hierfuzz sim MODULE=hierfuzz_entry VERILOG_SOURCES=dut.v ...`
+4. Repeats for `reference.v` to build `reference_dut.v` and re-runs every mismatch input from the buggy run against the reference, flagging real bug detections
+
+The receptor (DifuzzRTL benchmark wrapper) is variant-independent — only the host module's coverage instrumentation differs across variants.
 
 ## Troubleshooting
 
-### firrtl2 fails with SInt type error
+### `io_hierCovSum` not found in `host.v`
 
-If you see a FIRRTL type error about `UIntLiteral` applied to `SInt`, the design has SInt registers. Switch to the `_fix` variant:
+The Yosys export step failed silently, or you ran an older variant whose pass name doesn't exist in your encarsia-yosys build. Check:
 
-Edit `gen_hiercov.sh` and change `-fct hier_cov.hierCoverage_v6a` to `-fct hier_cov.hierCoverage_v4_fix`.
+1. The pass exists: `yosys -h hierfuzz_instrument_v9a` inside the container should print help
+2. The TCL script exists: `cat encarsia-meta/.../hierfuzz_v9a_export.tcl`
+3. Force regen: `rm out/<run>/<host>/driver/<N>/hierfuzz_v9a/{host.v,dut.v}` and re-run
 
-### Yosys can't parse hierCov Verilog
+### `Warning: skipping hierfuzz_v9a for bug ...`
 
-firrtl2 emits Verilog-2001 which Yosys handles. If there are issues, check for unsupported constructs in the firrtl2 output and post-process if needed.
+The wrapper sets `compile_failed = True` whenever the bug-injected `host.rtlil` is missing for a particular bug — Encarsia's bug-injection sometimes fails for individual bugs. Check `out/<run>/<host>/<driver|multiplexer>/<N>/host.rtlil`.
 
-### `io_hierCovSum` not found in dut.v
+### BOOM host module name is `BoomCore`, not `Boom`
 
-Verify that:
-1. `hiercov_build/rocket_hiercov_v6a.v` exists and contains `io_hierCovSum`
-2. The mount is correct: `ls /encarsia-hierfuzz/hiercov_build/` inside Docker
-3. `reference.v` was regenerated (delete `out/test/rocket/reference.v` to force rebuild)
+`config.boom_config.host_module = "BoomCore"`. The receptor regex strips `BoomCore` (not `Boom`) when building `hierfuzz_receptor.v`. If you add a new BOOM-based config, make sure `host_module` matches the actual top module emitted by Chipyard.
 
-### BOOM host module name
+### Stale `host.v` / `dut.v` after changing the instrumentation pass
 
-BOOM's host module is `BoomCore` (not `Boom`). The receptor strips `BoomCore`, keeping `BoomTile` as the toplevel with hierCov connections.
+The wrappers use `if not os.path.exists(...)` guards to avoid redundant Yosys runs. After editing `host.py`'s TCL generators or adding a new variant, delete the per-bug intermediates:
 
-## File changes reference
+```bash
+find out -name 'host.v'        -path '*/hierfuzz_v9a/*' -delete
+find out -name 'dut.v'         -path '*/hierfuzz_v9a/*' -delete
+find out -name 'reference.v'   -path '*/hierfuzz_v9a/*' -delete
+find out -name 'reference_dut.v' -path '*/hierfuzz_v9a/*' -delete
+```
 
-| File | Change |
-|------|--------|
-| `defines.py` | Added `HIERCOV_BUILD`, `HIERCOV_*_REF`, `HIERCOV_*_RECEPTOR` paths |
-| `config.py` | Added `hiercov_reference`, `hiercov_receptor` config params (rocket + boom) |
-| `host.py` | `create_reference()` splices hierCov Verilog; `create_hierfuzz_receptor()` uses hierCov receptor; added `create_hierfuzz_export_script()` (plain export, no `difuzzrtl_instrument`) |
-| `fuzzers/hierfuzz_v6a_dut.py` | Uses `hierfuzz_export_script` + `hierfuzz_reference_export` instead of `instrument_script` + `export_difuzzrtl_reference` |
-| `fuzzers/hierfuzz_v6b_dut.py` | Same changes as v6a |
-| `fuzzers/no_cov_hierfuzz_dut.py` | Same export changes (still passes `NO_GUIDE=1`) |
-| `gen_receptor.py` | New: strips a module from Verilog to create receptor |
-| `gen_hiercov.sh` | New: one-time local generation of hierCov artifacts |
+### Adding a new variant (e.g. v9b)
+
+1. Confirm the Yosys pass `hierfuzz_instrument_v9b` is registered in `encarsia-yosys/passes/hierfuzz/instrument_hierfuzz.cc` (already there for v6a/v6b/v7/v7b/v8a/v8b/v9a/v9b/v9c/v9d).
+2. In `host.py`'s `create_hierfuzz_export_script()`, add a `hierfuzz_v9b_export_script` and `hierfuzz_v9b_ref_export` block mirroring the v9a one.
+3. Copy `fuzzers/hierfuzz_v9a_dut.py` → `fuzzers/hierfuzz_v9b_dut.py` and replace every `_v9a` with `_v9b` (also rename the class `HierFuzzV9aDUT` → `HierFuzzV9bDUT`).
+4. In `encarsia.py`, add the import and a new `elif fuzzer == "hierfuzz_v9b":` branch following the v9a pattern.
+
+## File reference
+
+| File | Role |
+|------|------|
+| `defines.py` | Constants: `YOSYS_PATH`, `HIERFUZZ_FUZZER`, etc. |
+| `config.py` | `EncarsiaConfig` per host (rocket / boom / cva6 / ibex), incl. `host_module` and `hierfuzz_receptor_sources` |
+| `host.py` | Generates per-bug Yosys TCL scripts (`create_hierfuzz_export_script`) and the receptor (`create_hierfuzz_receptor`) |
+| `fuzzers/hierfuzz_v6a_dut.py`, `_v6b_dut.py`, `_v9a_dut.py`, ... | Per-variant wrapper: runs Yosys export → concatenates with receptor → drives `make -C hierfuzz sim` |
+| `encarsia.py` | CLI dispatch: maps `-F` arguments to wrapper classes |

@@ -25,8 +25,6 @@ class EncarsiaConfig:
         cascade_executable: str,
         difuzzrtl_toplevel: str,
         hierfuzz_receptor_sources: list[str] = None,
-        hiercov_reference: str = None,
-        hiercov_receptor: str = None
     ):
         # paths
         self.reference_sources = reference_sources
@@ -34,8 +32,6 @@ class EncarsiaConfig:
         self.difuzzrtl_receptor_sources = difuzzrtl_receptor_sources
         self.processorfuzz_receptor_sources = processorfuzz_receptor_sources
         self.hierfuzz_receptor_sources = hierfuzz_receptor_sources or []
-        self.hiercov_reference = hiercov_reference
-        self.hiercov_receptor = hiercov_receptor
 
         # injection
         self.host_module = host_module
@@ -100,8 +96,6 @@ rocket_config = EncarsiaConfig(
     hierfuzz_receptor_sources = [
         os.path.abspath("/encarsia-difuzz-rtl/Benchmarks/Verilog/RocketTile_encarsia.v")
     ],
-    hiercov_reference = defines.HIERCOV_ROCKET_REF,
-    hiercov_receptor = defines.HIERCOV_ROCKET_RECEPTOR
 )
 
 boom_config = EncarsiaConfig(
@@ -142,8 +136,6 @@ boom_config = EncarsiaConfig(
     hierfuzz_receptor_sources = [
         os.path.abspath("/encarsia-difuzz-rtl/Benchmarks/Verilog/SmallBoomTile_encarsia.v")
     ],  # DifuzzRTL receptor — correct version, needs preprocessing for Yosys
-    hiercov_reference = defines.HIERCOV_BOOM_REF,
-    hiercov_receptor = defines.HIERCOV_BOOM_RECEPTOR
 )
 
 cva6_config = EncarsiaConfig(

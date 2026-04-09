@@ -428,6 +428,27 @@ class Host:
             with open(self.hierfuzz_v7_ref_export, 'w') as f:
                 f.write(script)
 
+        # v9a: latest hierCov variant (current best alongside v6a/v6b)
+        self.hierfuzz_v9a_export_script = os.path.join(self.directory, "hierfuzz_v9a_export.tcl")
+        if not os.path.exists(self.hierfuzz_v9a_export_script):
+            script = (
+                f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v9a"\n'
+                f'yosys "write_verilog host.v"\n'
+            )
+            with open(self.hierfuzz_v9a_export_script, 'w') as f:
+                f.write(script)
+
+        self.hierfuzz_v9a_ref_export = os.path.join(self.directory, "hierfuzz_v9a_ref_export.tcl")
+        if not os.path.exists(self.hierfuzz_v9a_ref_export):
+            script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v9a"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.hierfuzz_v9a_ref_export, 'w') as f:
+                f.write(script)
+
     def inject(self):
         self.inject_multiplexer_log = os.path.join(self.directory, "inject_multiplexer.log")
         if not os.path.exists(self.inject_multiplexer_log):

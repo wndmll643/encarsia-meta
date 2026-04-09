@@ -17,10 +17,4 @@ JASPER = os.path.abspath("cds_jasper")
 JASPER_SRCS = os.path.abspath("./jasper")
 HIERFUZZ_FUZZER = "/encarsia-hierfuzz/hierfuzz"
 
-HIERCOV_BUILD = "/encarsia-hierfuzz/hiercov_build"
-HIERCOV_ROCKET_REF = os.path.join(HIERCOV_BUILD, "rocket_hiercov_v6a.v")
-HIERCOV_ROCKET_RECEPTOR = os.path.join(HIERCOV_BUILD, "rocket_hiercov_receptor.v")
-HIERCOV_BOOM_REF = os.path.join(HIERCOV_BUILD, "boom_hiercov_v6a.v")
-HIERCOV_BOOM_RECEPTOR = os.path.join(HIERCOV_BUILD, "boom_hiercov_receptor.v")
-
 FUZZING_TIMEOUT = 1800
