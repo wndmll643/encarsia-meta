@@ -249,6 +249,15 @@ class Host:
             with open(self.export_script, 'w') as export_script_file:
                 export_script_file.write(export_script)
 
+        self.export_cascade_reference = os.path.join(self.directory, "export_cascade_reference.tcl")
+        if not os.path.exists(self.export_cascade_reference):
+            export_cascade_reference_script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.export_cascade_reference, 'w') as f:
+                f.write(export_cascade_reference_script)
+
     def create_instrument_script(self):
         self.instrument_script = os.path.join(self.directory, "instrument.tcl")
         if not os.path.exists(self.instrument_script):
@@ -426,6 +435,28 @@ class Host:
                 f'yosys "write_verilog reference.v"\n'
             )
             with open(self.hierfuzz_v7_ref_export, 'w') as f:
+                f.write(script)
+
+        # v9a: direct concatenation / XOR-fold hash, v6b-style fixed sizing,
+        # submodHashSize=16, maxAddrWidth=20, control input ports for input hash
+        self.hierfuzz_v9a_export_script = os.path.join(self.directory, "hierfuzz_v9a_export.tcl")
+        if not os.path.exists(self.hierfuzz_v9a_export_script):
+            script = (
+                f'yosys "read_rtlil ../host.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v9a"\n'
+                f'yosys "write_verilog host.v"\n'
+            )
+            with open(self.hierfuzz_v9a_export_script, 'w') as f:
+                f.write(script)
+
+        self.hierfuzz_v9a_ref_export = os.path.join(self.directory, "hierfuzz_v9a_ref_export.tcl")
+        if not os.path.exists(self.hierfuzz_v9a_ref_export):
+            script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "hierfuzz_instrument_v9a"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.hierfuzz_v9a_ref_export, 'w') as f:
                 f.write(script)
 
     def inject(self):

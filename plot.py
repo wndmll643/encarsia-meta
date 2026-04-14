@@ -4,6 +4,7 @@
 
 import datetime
 import os
+import re
 import tabulate
 
 def read_duration(log_path):
@@ -56,18 +57,25 @@ def plot_verification():
 fuzzing_data = []
 totals = []
 max_bugs = 0
+ttb_data = []
 def save_fuzzing_results(host, fuzzer, duts):
     global max_bugs
     success_driver = []
     success_multiplexer = []
+    ttb_values = []
     duts.sort(key=lambda x: int(x.bug.name))
     for dut in duts:
         with open(dut.check_summary, 'r') as check_summary_file:
-            detected = "✘" if "NOT DETECTED" in check_summary_file.read() else "✔"
+            content = check_summary_file.read()
+            detected = "✘" if "NOT DETECTED" in content else "✔"
             if dut.bug.driver:
                 success_driver.append(detected)
             else:
                 success_multiplexer.append(detected)
+            # Parse TTB if present
+            m = re.search(r"TTB:\s+([\d.]+)", content)
+            if m and detected == "✔":
+                ttb_values.append(float(m.group(1)))
 
     driver_data = [host.name, "Mix-up", fuzzer]
     driver_data.extend(success_driver)
@@ -82,6 +90,11 @@ def save_fuzzing_results(host, fuzzer, duts):
     if len(success_multiplexer) > max_bugs:
         max_bugs = len(success_multiplexer)
 
+    if ttb_values:
+        median_ttb = sorted(ttb_values)[len(ttb_values) // 2]
+        mean_ttb = sum(ttb_values) / len(ttb_values)
+        ttb_data.append([host.name, fuzzer, len(ttb_values), f"{mean_ttb:.1f}", f"{median_ttb:.1f}"])
+
 def plot_fuzzing():
     fuzzing_headers = ["Design", "Bug Category", "Fuzzer"]
     fuzzing_headers.extend(range(1, max_bugs+1))
@@ -92,3 +105,8 @@ def plot_fuzzing():
         
     print("\nFuzzing results:")
     print(tabulate.tabulate(fuzzing_data, headers=fuzzing_headers, stralign="center", numalign="right", tablefmt="grid"))
+
+    if ttb_data:
+        ttb_headers = ["Design", "Fuzzer", "Bugs w/ TTB", "Mean TTB (s)", "Median TTB (s)"]
+        print("\nTime to Bug (TTB) results:")
+        print(tabulate.tabulate(ttb_data, headers=ttb_headers, stralign="center", numalign="right", tablefmt="grid"))

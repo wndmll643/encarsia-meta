@@ -1,4 +1,5 @@
 import os
+import signal
 import subprocess
 import random
 import string
@@ -108,27 +109,39 @@ class HierFuzzV6bDUT():
         if self.compile_failed:
             return self
         self.fuzz_log = os.path.join(self.directory, "fuzz.log")
+        ts_path = os.path.join(self.directory, "fuzz_start.timestamp")
         if not os.path.exists(self.fuzz_log):
-            with open(self.fuzz_log, 'w') as fuzz_log:
-                process = subprocess.Popen(
-                    [
-                        "make",
-                        "MODULE=hierfuzz_entry",
-                        f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
-                        f"VERILOG_SOURCES={self.dut_path}",
-                        f"VERILOG_FILE={self.dut_path}",
-                        f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
-                        f"NUM_ITER=10000000",
-                        f"RECORD=1",
-                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
-                    ],
-                    cwd=defines.HIERFUZZ_FUZZER,
-                    stdout=fuzz_log,
-                    stderr=subprocess.DEVNULL,
-                    env=self.env
-                )
-                time.sleep(defines.FUZZING_TIMEOUT)
-                process.terminate()
+            self.fuzz_start_time = time.time()
+            with open(ts_path, 'w') as f:
+                f.write(str(self.fuzz_start_time))
+            process = subprocess.Popen(
+                [
+                    "make",
+                    "MODULE=hierfuzz_entry",
+                    f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
+                    f"VERILOG_SOURCES={self.dut_path}",
+                    f"VERILOG_FILE={self.dut_path}",
+                    f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
+                    f"NUM_ITER=10000000",
+                    f"RECORD=1",
+                    f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
+                ],
+                cwd=defines.HIERFUZZ_FUZZER,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=self.env,
+                preexec_fn=os.setsid
+            )
+            time.sleep(defines.FUZZING_TIMEOUT)
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            process.wait()
+            open(self.fuzz_log, 'w').close()
+        else:
+            if os.path.exists(ts_path):
+                with open(ts_path, 'r') as f:
+                    self.fuzz_start_time = float(f.read().strip())
+            else:
+                self.fuzz_start_time = None
 
         return self
 
@@ -195,8 +208,14 @@ class HierFuzzV6bDUT():
 
             with open(log, 'r') as log_file:
                 if "Bug --" not in log_file.read():
+                    ttb_str = ""
+                    if hasattr(self, 'fuzz_start_time') and self.fuzz_start_time is not None:
+                        mismatch_path = os.path.join(self.out_directory, 'mismatch', 'sim_input', input)
+                        if os.path.exists(mismatch_path):
+                            ttb = os.path.getmtime(mismatch_path) - self.fuzz_start_time
+                            ttb_str = f" TTB: {ttb:.1f}"
                     with open(self.check_summary, 'w') as check_summary_file:
-                        check_summary_file.write("DETECTED: " + input)
+                        check_summary_file.write("DETECTED: " + input + ttb_str)
                     return self
 
         with open(self.check_summary, 'w') as check_summary_file:
