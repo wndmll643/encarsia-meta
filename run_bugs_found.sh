@@ -54,52 +54,64 @@ select_subset() {
 }
 
 # Build -D / -M flag arrays from the selected_*_bugs.txt files.
-# Echoes them to stdout as a single space-separated string.
-selected_args() {
-  local args=""
+# Populates SELECTED_DRIVER_BUGS / SELECTED_MUX_BUGS globals for reuse.
+load_selected_args() {
+  SELECTED_DRIVER_BUGS=()
+  SELECTED_MUX_BUGS=()
   for h in ${HOSTS}; do
     local drv_file="${CORPUS_DIR}/${h}/selected_driver_bugs.txt"
     local mux_file="${CORPUS_DIR}/${h}/selected_mux_bugs.txt"
     if [[ -f "${drv_file}" ]]; then
-      args+=" -D $(tr '\n' ' ' < ${drv_file})"
+      while IFS= read -r bug_id; do
+        [[ -n "${bug_id}" ]] && SELECTED_DRIVER_BUGS+=("${bug_id}")
+      done < "${drv_file}"
     fi
     if [[ -f "${mux_file}" ]]; then
-      args+=" -M $(tr '\n' ' ' < ${mux_file})"
+      while IFS= read -r bug_id; do
+        [[ -n "${bug_id}" ]] && SELECTED_MUX_BUGS+=("${bug_id}")
+      done < "${mux_file}"
     fi
   done
-  echo "${args}"
 }
 
 compile_phase() {
   echo "=== Step 4: Phase 0 compile (all 8 fuzzers, parallel) ==="
   mkdir -p "${RESULTS_DIR}"
-  # shellcheck disable=SC2046
+  load_selected_args
   python multi_run_ttb.py \
     -d "${CORPUS_DIR}" -H ${HOSTS} -p "${PROCS}" -N "${N_RUNS}" \
     --results-dir "${RESULTS_DIR}" \
     --fuzzers ${FULL8[@]} \
+    "${SELECTED_DRIVER_BUGS[@]/#/-D}" \
+    "${SELECTED_MUX_BUGS[@]/#/-M}" \
     --phase0-only
 }
 
 fuzz_core4() {
   echo "=== Step 5a: Core 4 fuzz sweep ==="
   mkdir -p "${RESULTS_DIR}"
+  load_selected_args
   python multi_run_ttb.py \
     -d "${CORPUS_DIR}" -H ${HOSTS} -p "${FUZZ_PROCS}" -N "${N_RUNS}" \
     --early-stop "${EARLY_STOP}" --skip-phase0 \
     --results-dir "${RESULTS_DIR}" \
     --fuzzers ${CORE4[@]} \
+    "${SELECTED_DRIVER_BUGS[@]/#/-D}" \
+    "${SELECTED_MUX_BUGS[@]/#/-M}" \
     2>&1 | tee -a "${RESULTS_DIR}/core4.log"
 }
 
 fuzz_full8() {
   echo "=== Step 5b: Full 8 fuzz sweep (resumes Core 4) ==="
   mkdir -p "${RESULTS_DIR}"
+  load_selected_args
   python multi_run_ttb.py \
     -d "${CORPUS_DIR}" -H ${HOSTS} -p "${FUZZ_PROCS}" -N "${N_RUNS}" \
     --early-stop "${EARLY_STOP}" --skip-phase0 \
     --results-dir "${RESULTS_DIR}" \
     --fuzzers ${FULL8[@]} \
+    "${SELECTED_DRIVER_BUGS[@]/#/-D}" \
+    "${SELECTED_MUX_BUGS[@]/#/-M}" \
     2>&1 | tee -a "${RESULTS_DIR}/full8.log"
 }
 
