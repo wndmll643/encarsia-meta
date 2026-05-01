@@ -26,6 +26,7 @@ class HierFuzzV6aDUT():
             f":/encarsia-difuzz-rtl/Fuzzer/RTLSim/src"
         )
         self.env["COCOTB_RESULTS_FILE"] = os.path.join(defines.HIERFUZZ_FUZZER, "cocotb_results", self.name)
+        os.makedirs(os.path.dirname(self.env["COCOTB_RESULTS_FILE"]), exist_ok=True)
         self.compile_failed = False
 
     def create_dut(self):
