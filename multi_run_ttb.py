@@ -259,8 +259,10 @@ def multi_run_worker(args):
         # 6. Update counter
         if result["status"] == "DETECTED":
             consec_fails = 0
+            ttb = result.get('ttb')
+            ttb_str = f"{ttb:.1f}s" if isinstance(ttb, (int, float)) else "?"
             print(f"  [{host_name}/{category}/{bug_name}/{fuzzer_name}] "
-                  f"Run {run_idx}: DETECTED TTB={result.get('ttb', '?'):.1f}s")
+                  f"Run {run_idx}: DETECTED TTB={ttb_str}")
         else:
             consec_fails += 1
 
