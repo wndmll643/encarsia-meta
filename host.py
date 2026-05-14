@@ -459,6 +459,34 @@ class Host:
             with open(self.hierfuzz_v9a_ref_export, 'w') as f:
                 f.write(script)
 
+        # v11 / v12: each variant gets host + reference TCL scripts following
+        # the v9a pattern. The only difference per variant is the Yosys
+        # `hierfuzz_instrument_*` pass name (must match the Pass()
+        # registration in encarsia-yosys/passes/hierfuzz/instrument_hierfuzz.cc).
+        for v in ("v11a", "v11b", "v12a", "v12b"):
+            host_attr = f"hierfuzz_{v}_export_script"
+            ref_attr  = f"hierfuzz_{v}_ref_export"
+            host_path = os.path.join(self.directory, f"hierfuzz_{v}_export.tcl")
+            ref_path  = os.path.join(self.directory, f"hierfuzz_{v}_ref_export.tcl")
+            setattr(self, host_attr, host_path)
+            setattr(self, ref_attr,  ref_path)
+            if not os.path.exists(host_path):
+                script = (
+                    f'yosys "read_rtlil ../host.rtlil"\n'
+                    f'yosys "hierfuzz_instrument_{v}"\n'
+                    f'yosys "write_verilog host.v"\n'
+                )
+                with open(host_path, 'w') as f:
+                    f.write(script)
+            if not os.path.exists(ref_path):
+                script = (
+                    f'yosys "read_rtlil ../reference.rtlil"\n'
+                    f'yosys "hierfuzz_instrument_{v}"\n'
+                    f'yosys "write_verilog reference.v"\n'
+                )
+                with open(ref_path, 'w') as f:
+                    f.write(script)
+
     def inject(self):
         self.inject_multiplexer_log = os.path.join(self.directory, "inject_multiplexer.log")
         if not os.path.exists(self.inject_multiplexer_log):

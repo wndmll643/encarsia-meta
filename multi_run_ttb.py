@@ -30,6 +30,10 @@ from fuzzers.hierfuzz_v6b_dut import HierFuzzV6bDUT
 from fuzzers.hierfuzz_v9a_dut import HierFuzzV9aDUT
 from fuzzers.hierfuzz_v6a_pfuzz_dut import HierFuzzV6aPfuzzDUT
 from fuzzers.hierfuzz_v9a_pfuzz_dut import HierFuzzV9aPfuzzDUT
+from fuzzers.hierfuzz_v11a_dut import HierFuzzV11aDUT
+from fuzzers.hierfuzz_v11b_dut import HierFuzzV11bDUT
+from fuzzers.hierfuzz_v12a_dut import HierFuzzV12aDUT
+from fuzzers.hierfuzz_v12b_dut import HierFuzzV12bDUT
 from fuzzers.ttb_difuzzrtl_dut import TTBDifuzzRTLDUT
 from fuzzers.ttb_processorfuzz_dut import TTBProcessorfuzzDUT
 from fuzzers.filtered_cascade_dut import FilteredCascadeDUT
@@ -40,6 +44,10 @@ FUZZER_MAP = {
     'hierfuzz_v9a': HierFuzzV9aDUT,
     'hierfuzz_v6a_pfuzz': HierFuzzV6aPfuzzDUT,
     'hierfuzz_v9a_pfuzz': HierFuzzV9aPfuzzDUT,
+    'hierfuzz_v11a': HierFuzzV11aDUT,
+    'hierfuzz_v11b': HierFuzzV11bDUT,
+    'hierfuzz_v12a': HierFuzzV12aDUT,
+    'hierfuzz_v12b': HierFuzzV12bDUT,
     'ttb_difuzzrtl': TTBDifuzzRTLDUT,
     'ttb_processorfuzz': TTBProcessorfuzzDUT,
     'filtered_cascade': FilteredCascadeDUT,
