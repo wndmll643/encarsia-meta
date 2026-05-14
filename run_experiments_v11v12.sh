@@ -112,14 +112,27 @@ for f in "${FUZZERS[@]}"; do
 done
 
 if [[ ${#NEED_NEW_PASSES[@]} -gt 0 && $AGGREGATE_ONLY -eq 0 ]]; then
-  # Use the same YOSYS_PATH the DUT classes use (encarsia-meta/defines.py).
-  YOSYS_BIN="$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import defines; print(defines.YOSYS_PATH)" 2>/dev/null || true)"
+  # Resolve the yosys binary the DUT classes will use. defines.py typically
+  # has YOSYS_PATH = "yosys" (a bare command name), so the literal `test -x`
+  # below would fail even when yosys is fully available via $PATH. Run it
+  # through `command -v` when it doesn't contain a slash, so PATH lookup
+  # works and the preflight actually fires inside the container.
+  YOSYS_RAW="$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); import defines; print(defines.YOSYS_PATH)" 2>/dev/null || true)"
+  YOSYS_BIN=""
+  if [[ -n "$YOSYS_RAW" ]]; then
+    if [[ "$YOSYS_RAW" == */* ]]; then
+      YOSYS_BIN="$YOSYS_RAW"
+    else
+      YOSYS_BIN="$(command -v "$YOSYS_RAW" 2>/dev/null || true)"
+    fi
+  fi
+
   if [[ -z "$YOSYS_BIN" || ! -x "$YOSYS_BIN" ]]; then
-    echo "WARN: could not resolve defines.YOSYS_PATH (or it isn't executable); skipping preflight." >&2
+    echo "WARN: could not resolve defines.YOSYS_PATH ('$YOSYS_RAW') to an executable; skipping preflight." >&2
     echo "      If v11/v12 fuzzers fail with 'command not found', rebuild Yosys with the" >&2
     echo "      updated encarsia-yosys/passes/hierfuzz/instrument_hierfuzz.cc and retry." >&2
   else
-    echo "Preflight: confirming Yosys passes ${NEED_NEW_PASSES[*]} are loadable..."
+    echo "Preflight: confirming Yosys passes ${NEED_NEW_PASSES[*]} are loadable via $YOSYS_BIN ..."
     HELP_CMD=""
     for p in "${NEED_NEW_PASSES[@]}"; do
       HELP_CMD+="help $p; "
