@@ -60,8 +60,11 @@ FUZZERS=()
 PHASE0_ONLY=0
 SKIP_PHASE0=0
 AGGREGATE_ONLY=0
+PASSTHROUGH=()
 
 # Simple flag loop (not argparse-perfect; matches the multi_run_ttb.py CLI shape).
+# Unknown flags get forwarded to multi_run_ttb.py untouched so its own argparse
+# can handle them (covers -D/--driver-bugs, -M/--mux-bugs, --early-stop, …).
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -d|--directory)        DIRECTORY="$2"; shift 2 ;;
@@ -74,7 +77,14 @@ while [[ $# -gt 0 ]]; do
     --skip-phase0)         SKIP_PHASE0=1; shift ;;
     --aggregate-only)      AGGREGATE_ONLY=1; shift ;;
     -h|--help)             sed -n '1,30p' "$0"; exit 0 ;;
-    *)                     echo "Unknown flag: $1" >&2; exit 1 ;;
+    # Flags with nargs='+' on the inner argparse — slurp following positional
+    # values until the next dash-flag.
+    -D|--driver-bugs|-M|--mux-bugs|--multiplexer-bugs)
+      PASSTHROUGH+=("$1"); shift
+      while [[ $# -gt 0 && "$1" != -* ]]; do PASSTHROUGH+=("$1"); shift; done
+      ;;
+    # Single-value pass-throughs (--early-stop, etc.):
+    *)                     PASSTHROUGH+=("$1"); shift ;;
   esac
 done
 
@@ -160,6 +170,7 @@ ARGS=(
 if [[ $PHASE0_ONLY -eq 1 ]];    then ARGS+=(--phase0-only); fi
 if [[ $SKIP_PHASE0 -eq 1 ]];    then ARGS+=(--skip-phase0); fi
 if [[ $AGGREGATE_ONLY -eq 1 ]]; then ARGS+=(--aggregate-only); fi
+if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then ARGS+=("${PASSTHROUGH[@]}"); fi
 
 echo "Launch: ${ARGS[*]}"
 "${ARGS[@]}"
