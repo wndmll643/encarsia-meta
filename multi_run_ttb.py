@@ -7,8 +7,8 @@ compilation and detection logic.
 Usage:
     python multi_run_ttb.py -d out/EnCorpus -H rocket boom -p 15 -N 100 \
         --early-stop 10 --results-dir out/ttb_results \
-        --fuzzers hierfuzz_v6a hierfuzz_v6b hierfuzz_v6a_pfuzz \
-                  hierfuzz_v9a hierfuzz_v9a_pfuzz ttb_difuzzrtl ttb_processorfuzz
+        --fuzzers hierfuzz_data_bucket hierfuzz_ctrl_bucket hierfuzz_data_bucket_pfuzz \
+                  hierfuzz_ctrl_fold hierfuzz_ctrl_fold_pfuzz ttb_difuzzrtl ttb_processorfuzz
 """
 
 import argparse
@@ -25,13 +25,19 @@ import traceback
 
 from host import Host
 from bug import Bug
-from fuzzers.hierfuzz_v6a_dut import HierFuzzV6aDUT
-from fuzzers.hierfuzz_v6b_dut import HierFuzzV6bDUT
-from fuzzers.hierfuzz_v9a_dut import HierFuzzV9aDUT
-from fuzzers.hierfuzz_v6a_pfuzz_dut import HierFuzzV6aPfuzzDUT
-from fuzzers.hierfuzz_v9a_pfuzz_dut import HierFuzzV9aPfuzzDUT
+from fuzzers.hierfuzz_data_bucket_dut import HierFuzzDataBucketDUT
+from fuzzers.hierfuzz_ctrl_bucket_dut import HierFuzzCtrlBucketDUT
+from fuzzers.hierfuzz_ctrl_fold_dut import HierFuzzCtrlFoldDUT
+from fuzzers.hierfuzz_ctrl_bucket_tree_dut import HierFuzzCtrlBucketTreeDUT
+from fuzzers.hierfuzz_data_bucket_tree_dut import HierFuzzDataBucketTreeDUT
+from fuzzers.hierfuzz_data_bucket_pfuzz_dut import HierFuzzDataBucketPfuzzDUT
+from fuzzers.hierfuzz_ctrl_fold_pfuzz_dut import HierFuzzCtrlFoldPfuzzDUT
+# Phase B: hierCov-gated ProcessorFuzz hybrids
+from fuzzers.hierfuzz_data_bucket_pfuzz_hcov_dut import HierFuzzDataBucketPfuzzHcovDUT
+from fuzzers.hierfuzz_ctrl_bucket_tree_pfuzz_hcov_dut import HierFuzzCtrlBucketTreePfuzzHcovDUT
+from fuzzers.hierfuzz_data_bucket_tree_pfuzz_hcov_dut import HierFuzzDataBucketTreePfuzzHcovDUT
+# Legacy hierfuzz variants (kept addressable for historical experiments)
 from fuzzers.hierfuzz_v11a_dut import HierFuzzV11aDUT
-from fuzzers.hierfuzz_v11b_dut import HierFuzzV11bDUT
 from fuzzers.hierfuzz_v12a_dut import HierFuzzV12aDUT
 from fuzzers.hierfuzz_v12b_dut import HierFuzzV12bDUT
 from fuzzers.ttb_difuzzrtl_dut import TTBDifuzzRTLDUT
@@ -39,22 +45,35 @@ from fuzzers.ttb_processorfuzz_dut import TTBProcessorfuzzDUT
 from fuzzers.filtered_cascade_dut import FilteredCascadeDUT
 
 FUZZER_MAP = {
-    'hierfuzz_v6a': HierFuzzV6aDUT,
-    'hierfuzz_v6b': HierFuzzV6bDUT,
-    'hierfuzz_v9a': HierFuzzV9aDUT,
-    'hierfuzz_v6a_pfuzz': HierFuzzV6aPfuzzDUT,
-    'hierfuzz_v9a_pfuzz': HierFuzzV9aPfuzzDUT,
+    # Active variants
+    'hierfuzz_data_bucket':       HierFuzzDataBucketDUT,        # was hierfuzz_v6a
+    'hierfuzz_ctrl_bucket':       HierFuzzCtrlBucketDUT,        # was hierfuzz_v6b
+    'hierfuzz_ctrl_fold':         HierFuzzCtrlFoldDUT,          # was hierfuzz_v9a
+    'hierfuzz_ctrl_bucket_tree':  HierFuzzCtrlBucketTreeDUT,    # was hierfuzz_v11b
+    'hierfuzz_data_bucket_tree':  HierFuzzDataBucketTreeDUT,    # new
+    'hierfuzz_data_bucket_pfuzz': HierFuzzDataBucketPfuzzDUT,   # was hierfuzz_v6a_pfuzz
+    'hierfuzz_ctrl_fold_pfuzz':   HierFuzzCtrlFoldPfuzzDUT,     # was hierfuzz_v9a_pfuzz
+    # Phase B: hierCov-gated ProcessorFuzz hybrids (new in this work)
+    'hierfuzz_data_bucket_pfuzz_hcov':      HierFuzzDataBucketPfuzzHcovDUT,
+    'hierfuzz_ctrl_bucket_tree_pfuzz_hcov': HierFuzzCtrlBucketTreePfuzzHcovDUT,
+    'hierfuzz_data_bucket_tree_pfuzz_hcov': HierFuzzDataBucketTreePfuzzHcovDUT,
+    # Legacy variants (historical)
     'hierfuzz_v11a': HierFuzzV11aDUT,
-    'hierfuzz_v11b': HierFuzzV11bDUT,
     'hierfuzz_v12a': HierFuzzV12aDUT,
     'hierfuzz_v12b': HierFuzzV12bDUT,
+    # Baselines and reference fuzzers
     'ttb_difuzzrtl': TTBDifuzzRTLDUT,
     'ttb_processorfuzz': TTBProcessorfuzzDUT,
     'filtered_cascade': FilteredCascadeDUT,
 }
 
 # Fuzzers that use out_replay/ (ProcessorFuzz-style two-stage check)
-PFUZZ_FUZZERS = {'hierfuzz_v6a_pfuzz', 'hierfuzz_v9a_pfuzz', 'ttb_processorfuzz'}
+PFUZZ_FUZZERS = {
+    'hierfuzz_data_bucket_pfuzz', 'hierfuzz_ctrl_fold_pfuzz', 'ttb_processorfuzz',
+    # hcov-gated hybrids (Phase B)
+    'hierfuzz_data_bucket_pfuzz_hcov', 'hierfuzz_ctrl_bucket_tree_pfuzz_hcov',
+    'hierfuzz_data_bucket_tree_pfuzz_hcov',
+}
 
 # Cascade-based fuzzers (different directory structure, no out/mismatch)
 CASCADE_FUZZERS = {'filtered_cascade'}
@@ -459,8 +478,12 @@ def main():
         aggregate_results(results_dir, args.n_runs)
         return
 
-    # Enumerate bugs
-    all_pairs = []
+    # Enumerate bugs first, then build pairs in FUZZER-MAJOR order so that
+    # pool.map(chunksize=1) fills all `-p` workers with bugs of the SAME
+    # fuzzer before moving to the next one. With bug-major dispatch (older
+    # version) the first 15 work units were 4 fuzzers x ~4 bugs interleaved,
+    # which under-utilised cores when N=10 runs per pair were sequential.
+    all_pairs_per_fz = {fz: [] for fz in args.fuzzers}
     for host_name in args.hosts:
         host = Host(corpus_dir, host_name)
 
@@ -472,9 +495,9 @@ def main():
                                  key=lambda x: int(x) if x.isdigit() else x)
             if args.driver_bugs:
                 driver_bugs = [b for b in driver_bugs if b in args.driver_bugs]
-            for bug_name in driver_bugs:
-                for fz in args.fuzzers:
-                    all_pairs.append((corpus_dir, host_name, bug_name, True, fz))
+            for fz in args.fuzzers:
+                for bug_name in driver_bugs:
+                    all_pairs_per_fz[fz].append((corpus_dir, host_name, bug_name, True, fz))
 
         # Multiplexer bugs
         mux_dir = host.mux_directory
@@ -484,15 +507,25 @@ def main():
                               key=lambda x: int(x) if x.isdigit() else x)
             if args.mux_bugs:
                 mux_bugs = [b for b in mux_bugs if b in args.mux_bugs]
-            for bug_name in mux_bugs:
-                for fz in args.fuzzers:
-                    all_pairs.append((corpus_dir, host_name, bug_name, False, fz))
+            for fz in args.fuzzers:
+                for bug_name in mux_bugs:
+                    all_pairs_per_fz[fz].append((corpus_dir, host_name, bug_name, False, fz))
+
+    # Concatenate fuzzer buckets in the user-supplied fuzzer order. All bugs
+    # of fuzzer 0 come first, then fuzzer 1, etc.
+    all_pairs = []
+    for fz in args.fuzzers:
+        all_pairs.extend(all_pairs_per_fz[fz])
 
     print(f"Total (bug, fuzzer) pairs: {len(all_pairs)}")
     print(f"Runs per pair: {args.n_runs}")
     print(f"Early stop after: {args.early_stop} consecutive non-detections")
     print(f"Parallel workers: {args.processes}")
     print(f"Results dir: {results_dir}")
+    print(f"Dispatch order: fuzzer-major (all bugs of same fuzzer fill -p workers before moving to next fuzzer)")
+    for fz in args.fuzzers:
+        n = len(all_pairs_per_fz[fz])
+        print(f"  {fz}: {n} (bug × host) pairs")
 
     # Phase 0: Compile
     if not args.skip_phase0:

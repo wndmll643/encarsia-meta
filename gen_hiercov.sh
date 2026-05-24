@@ -54,7 +54,7 @@ ROCKET_HIERCOV="$BUILD_DIR/rocket_hiercov_v6a.v"
 if [ ! -f "$ROCKET_HIERCOV" ]; then
     echo "Applying hierCov v6a to Rocket..."
     "$FIRRTL2" -td "$BUILD_DIR" -i "$ROCKET_LO_PATCHED" \
-        -fct hier_cov.hierCoverage_v6a -X verilog -o rocket_hiercov_v6a.v
+        -fct hier_cov.hierCoverage_data_bucket -X verilog -o rocket_hiercov_data_bucket.v
 fi
 
 ROCKET_GEN_DIR="/cascade-chipyard/sims/verilator/generated-src/chipyard.TestHarness.MyBigVMRocketConfig"
@@ -109,7 +109,7 @@ BOOM_HIERCOV="$BUILD_DIR/boom_hiercov_v6a.v"
 if [ ! -f "$BOOM_HIERCOV" ]; then
     echo "Applying hierCov v6a to BOOM..."
     "$FIRRTL2" -td "$BUILD_DIR" -i "$BOOM_LO_PATCHED" \
-        -fct hier_cov.hierCoverage_v6a -X verilog -o boom_hiercov_v6a.v
+        -fct hier_cov.hierCoverage_data_bucket -X verilog -o boom_hiercov_data_bucket.v
 fi
 
 BOOM_GEN_DIR="/cascade-chipyard/sims/verilator/generated-src/chipyard.TestHarness.MyMediumBoomConfigTracing"

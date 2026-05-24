@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Add metaAssert/metaReset ports to extmodule declarations in FIRRTL.
 
-hierCoverage_v6a adds these ports to all modules, but can't modify extmodules.
+hierCoverage_data_bucket adds these ports to all modules, but can't modify extmodules.
 This script patches extmodule declarations to include the expected ports so
 firrtl2 type checking passes.
 

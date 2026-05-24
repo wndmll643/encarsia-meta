@@ -1,3 +1,11 @@
+"""HierFuzz v9a coverage variant.
+
+Uses hierfuzz_instrument_ctrl_fold Yosys pass for coverage instrumentation
+(direct concatenation / XOR-fold hash, v6b-style fixed sizing,
+submodHashSize=16, maxAddrWidth=20, control input ports for input hash).
+Runs under the encarsia-hierfuzz cocotb harness, same as v6a/v6b/v7.
+"""
+
 import os
 import signal
 import subprocess
@@ -10,9 +18,9 @@ from host import Host
 from bug import Bug
 
 
-class HierFuzzV6aDUT():
+class HierFuzzCtrlFoldDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v6a")
+        self.directory = os.path.join(bug.directory, "hierfuzz_ctrl_fold")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -30,17 +38,16 @@ class HierFuzzV6aDUT():
         self.compile_failed = False
 
     def create_dut(self):
-        # Use plain host.rtlil — Yosys hierfuzz_instrument_v6a pass adds coverage
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v6a for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_ctrl_fold for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
         if not os.path.exists(self.module):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6a_export_script],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_fold_export_script],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -62,7 +69,7 @@ class HierFuzzV6aDUT():
         self.reference = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6a_ref_export],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_fold_ref_export],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL

@@ -38,14 +38,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default 10-way fuzzer list. Override with --fuzzers if you want a subset.
 DEFAULT_FUZZERS=(
-  hierfuzz_v6a
-  hierfuzz_v6b
-  hierfuzz_v9a
-  hierfuzz_v6a_pfuzz
-  hierfuzz_v11a
-  hierfuzz_v11b
-  hierfuzz_v12a
-  hierfuzz_v12b
+  hierfuzz_data_bucket           # was hierfuzz_v6a
+  hierfuzz_ctrl_bucket           # was hierfuzz_v6b
+  hierfuzz_ctrl_fold             # was hierfuzz_v9a
+  hierfuzz_data_bucket_pfuzz     # was hierfuzz_v6a_pfuzz
+  hierfuzz_v11a                  # legacy
+  hierfuzz_ctrl_bucket_tree      # was hierfuzz_v11b
+  hierfuzz_v12a                  # legacy
+  hierfuzz_v12b                  # legacy
   ttb_difuzzrtl
   ttb_processorfuzz
 )
@@ -115,7 +115,7 @@ NEED_NEW_PASSES=()
 for f in "${FUZZERS[@]}"; do
   case "$f" in
     hierfuzz_v11a) NEED_NEW_PASSES+=(hierfuzz_instrument_v11a) ;;
-    hierfuzz_v11b) NEED_NEW_PASSES+=(hierfuzz_instrument_v11b) ;;
+    hierfuzz_ctrl_bucket_tree) NEED_NEW_PASSES+=(hierfuzz_instrument_ctrl_bucket_tree) ;;
     hierfuzz_v12a) NEED_NEW_PASSES+=(hierfuzz_instrument_v12a) ;;
     hierfuzz_v12b) NEED_NEW_PASSES+=(hierfuzz_instrument_v12b) ;;
   esac

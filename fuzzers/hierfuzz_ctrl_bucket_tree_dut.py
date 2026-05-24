@@ -1,6 +1,6 @@
 """HierFuzz v11b coverage variant.
 
-Uses hierfuzz_instrument_v11b Yosys pass for coverage instrumentation.
+Uses hierfuzz_instrument_ctrl_bucket_tree Yosys pass for coverage instrumentation.
 See encarsia-yosys passes for the exact instrumentation semantics.
 """
 
@@ -16,9 +16,9 @@ from host import Host
 from bug import Bug
 
 
-class HierFuzzV11bDUT():
+class HierFuzzCtrlBucketTreeDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v11b")
+        self.directory = os.path.join(bug.directory, "hierfuzz_ctrl_bucket_tree")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -42,13 +42,13 @@ class HierFuzzV11bDUT():
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v11b for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_ctrl_bucket_tree for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
         if not os.path.exists(self.module):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v11b_export_script],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_bucket_tree_export_script],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -70,7 +70,7 @@ class HierFuzzV11bDUT():
         self.reference = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v11b_ref_export],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_bucket_tree_ref_export],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL

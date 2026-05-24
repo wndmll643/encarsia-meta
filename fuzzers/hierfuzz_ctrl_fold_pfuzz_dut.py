@@ -1,6 +1,6 @@
 """HierFuzz v9a coverage + ProcessorFuzz mutator.
 
-Uses hierfuzz_instrument_v9a Yosys pass for coverage instrumentation,
+Uses hierfuzz_instrument_ctrl_fold Yosys pass for coverage instrumentation,
 but runs under the ProcessorFuzz fuzzer (different mutation strategy).
 The DUT gets hierCov ports; ProcessorFuzz reads io_hierCovSum for feedback.
 """
@@ -18,9 +18,9 @@ from host import Host
 from bug import Bug
 
 
-class HierFuzzV9aPfuzzDUT():
+class HierFuzzCtrlFoldPfuzzDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v9a_pfuzz")
+        self.directory = os.path.join(bug.directory, "hierfuzz_ctrl_fold_pfuzz")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -38,13 +38,13 @@ class HierFuzzV9aPfuzzDUT():
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v9a_pfuzz for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_ctrl_fold_pfuzz for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
         if not os.path.exists(self.module):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v9a_export_script],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_fold_export_script],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -67,7 +67,7 @@ class HierFuzzV9aPfuzzDUT():
         self.reference = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v9a_ref_export],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_fold_ref_export],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
