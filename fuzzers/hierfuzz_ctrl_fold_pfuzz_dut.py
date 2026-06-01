@@ -1,11 +1,13 @@
-"""HierFuzz v6a coverage + ProcessorFuzz mutator.
+"""HierFuzz v9a coverage + ProcessorFuzz mutator.
 
-Uses hierfuzz_instrument_v6a Yosys pass for coverage instrumentation,
+Uses hierfuzz_instrument_ctrl_fold Yosys pass for coverage instrumentation,
 but runs under the ProcessorFuzz fuzzer (different mutation strategy).
 The DUT gets hierCov ports; ProcessorFuzz reads io_hierCovSum for feedback.
 """
 
 import os
+import shutil
+import signal
 import subprocess
 import random
 import string
@@ -16,9 +18,9 @@ from host import Host
 from bug import Bug
 
 
-class HierFuzzV6aPfuzzDUT():
+class HierFuzzCtrlFoldPfuzzDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v6a_pfuzz")
+        self.directory = os.path.join(bug.directory, "hierfuzz_ctrl_fold_pfuzz")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -32,17 +34,17 @@ class HierFuzzV6aPfuzzDUT():
         self.compile_failed = False
 
     def create_dut(self):
-        # Instrument with hierfuzz_v6a (hierCov ports) instead of difuzzrtl_instrument
+        # Instrument with hierfuzz_v9a (hierCov ports) instead of difuzzrtl_instrument
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v6a_pfuzz for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_ctrl_fold_pfuzz for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
         if not os.path.exists(self.module):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6a_export_script],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_fold_export_script],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -65,7 +67,7 @@ class HierFuzzV6aPfuzzDUT():
         self.reference = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6a_ref_export],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_fold_ref_export],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -112,26 +114,41 @@ class HierFuzzV6aPfuzzDUT():
         if self.compile_failed:
             return self
         self.fuzz_log = os.path.join(self.directory, "fuzz.log")
+        ts_path = os.path.join(self.directory, "fuzz_start.timestamp")
         if not os.path.exists(self.fuzz_log):
-            with open(self.fuzz_log, 'w') as fuzz_log:
-                process = subprocess.Popen(
-                    [
-                        "make",
-                        f"SIM_BUILD={os.path.relpath(self.build_directory, defines.PROCESSORFUZZ_FUZZER)}",
-                        f"VFILE={os.path.relpath(self.dut_path[:-2], defines.PROCESSORFUZZ_VERILOG)}",
-                        f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
-                        f"NUM_ITER=10000000",
-                        f"OUT={os.path.relpath(self.out_directory, defines.PROCESSORFUZZ_FUZZER)}",
-                        f"ALL_CSR=0",
-                        f"FP_CSR=0"
-                    ],
-                    cwd=defines.PROCESSORFUZZ_FUZZER,
-                    stdout=fuzz_log,
-                    stderr=subprocess.DEVNULL,
-                    env=self.env
-                )
-                time.sleep(defines.FUZZING_TIMEOUT)
-                process.terminate()
+            self.fuzz_start_time = time.time()
+            with open(ts_path, 'w') as f:
+                f.write(str(self.fuzz_start_time))
+            process = subprocess.Popen(
+                [
+                    "make",
+                    f"SIM_BUILD={os.path.relpath(self.build_directory, defines.PROCESSORFUZZ_FUZZER)}",
+                    f"VFILE={os.path.relpath(self.dut_path[:-2], defines.PROCESSORFUZZ_VERILOG)}",
+                    f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
+                    f"NUM_ITER=10000000",
+                    f"OUT={os.path.relpath(self.out_directory, defines.PROCESSORFUZZ_FUZZER)}",
+                    f"ALL_CSR=0",
+                    f"FP_CSR=0"
+                ],
+                cwd=defines.PROCESSORFUZZ_FUZZER,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=self.env,
+                preexec_fn=os.setsid
+            )
+            time.sleep(defines.FUZZING_TIMEOUT)
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            process.wait()
+            trace_dir = os.path.join(self.out_directory, "trace")
+            if os.path.isdir(trace_dir):
+                shutil.rmtree(trace_dir)
+            open(self.fuzz_log, 'w').close()
+        else:
+            if os.path.exists(ts_path):
+                with open(ts_path, 'r') as f:
+                    self.fuzz_start_time = float(f.read().strip())
+            else:
+                self.fuzz_start_time = None
 
         return self
 
@@ -247,8 +264,14 @@ class HierFuzzV6aPfuzzDUT():
             with open(log, 'r') as log_file:
                 contents = log_file.read()
                 if "MISMATCH:" not in contents and "Bug --" not in contents:
+                    ttb_str = ""
+                    if hasattr(self, 'fuzz_start_time') and self.fuzz_start_time is not None:
+                        mismatch_path = os.path.join(self.out_directory, 'mismatch', 'sim_input', input)
+                        if os.path.exists(mismatch_path):
+                            ttb = os.path.getmtime(mismatch_path) - self.fuzz_start_time
+                            ttb_str = f" TTB: {ttb:.1f}"
                     with open(self.check_summary, 'w') as check_summary_file:
-                        check_summary_file.write("DETECTED: " + input)
+                        check_summary_file.write("DETECTED: " + input + ttb_str)
                     return self
 
         with open(self.check_summary, 'w') as check_summary_file:

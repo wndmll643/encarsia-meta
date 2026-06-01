@@ -249,6 +249,15 @@ class Host:
             with open(self.export_script, 'w') as export_script_file:
                 export_script_file.write(export_script)
 
+        self.export_cascade_reference = os.path.join(self.directory, "export_cascade_reference.tcl")
+        if not os.path.exists(self.export_cascade_reference):
+            export_cascade_reference_script = (
+                f'yosys "read_rtlil ../reference.rtlil"\n'
+                f'yosys "write_verilog reference.v"\n'
+            )
+            with open(self.export_cascade_reference, 'w') as f:
+                f.write(export_cascade_reference_script)
+
     def create_instrument_script(self):
         self.instrument_script = os.path.join(self.directory, "instrument.tcl")
         if not os.path.exists(self.instrument_script):
@@ -342,56 +351,49 @@ class Host:
                 f.write(nocov_content)
 
     def create_hierfuzz_export_script(self):
-        # v6a: instrument plain RTLIL with Yosys hierfuzz pass (no pre-built hierCov needed)
-        self.hierfuzz_v6a_export_script = os.path.join(self.directory, "hierfuzz_v6a_export.tcl")
-        if not os.path.exists(self.hierfuzz_v6a_export_script):
-            script = (
-                f'yosys "read_rtlil ../host.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v6a"\n'
-                f'yosys "write_verilog host.v"\n'
-            )
-            with open(self.hierfuzz_v6a_export_script, 'w') as f:
-                f.write(script)
+        # Active variants — generate host + reference .tcl per Yosys pass.
+        # Each entry maps an attribute prefix (used in DUT classes as
+        # host.hierfuzz_<prefix>_export_script / _ref_export) to the Yosys
+        # pass registered in encarsia-yosys/passes/hierfuzz/instrument_hierfuzz.cc.
+        active_variants = (
+            ("data_bucket",      "hierfuzz_instrument_data_bucket"),       # was v6a
+            ("ctrl_bucket",      "hierfuzz_instrument_ctrl_bucket"),       # was v6b
+            ("ctrl_fold",        "hierfuzz_instrument_ctrl_fold"),         # was v9a
+            ("ctrl_bucket_tree", "hierfuzz_instrument_ctrl_bucket_tree"),  # was v11b
+            ("data_bucket_tree", "hierfuzz_instrument_data_bucket_tree"),  # new
+        )
+        for prefix, yosys_pass in active_variants:
+            host_attr = f"hierfuzz_{prefix}_export_script"
+            ref_attr  = f"hierfuzz_{prefix}_ref_export"
+            host_path = os.path.join(self.directory, f"hierfuzz_{prefix}_export.tcl")
+            ref_path  = os.path.join(self.directory, f"hierfuzz_{prefix}_ref_export.tcl")
+            setattr(self, host_attr, host_path)
+            setattr(self, ref_attr,  ref_path)
+            if not os.path.exists(host_path):
+                script = (
+                    f'yosys "read_rtlil ../host.rtlil"\n'
+                    f'yosys "{yosys_pass}"\n'
+                    f'yosys "write_verilog host.v"\n'
+                )
+                with open(host_path, 'w') as f:
+                    f.write(script)
+            if not os.path.exists(ref_path):
+                script = (
+                    f'yosys "read_rtlil ../reference.rtlil"\n'
+                    f'yosys "{yosys_pass}"\n'
+                    f'yosys "write_verilog reference.v"\n'
+                )
+                with open(ref_path, 'w') as f:
+                    f.write(script)
 
-        self.hierfuzz_v6a_ref_export = os.path.join(self.directory, "hierfuzz_v6a_ref_export.tcl")
-        if not os.path.exists(self.hierfuzz_v6a_ref_export):
-            script = (
-                f'yosys "read_rtlil ../reference.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v6a"\n'
-                f'yosys "write_verilog reference.v"\n'
-            )
-            with open(self.hierfuzz_v6a_ref_export, 'w') as f:
-                f.write(script)
-
-        # v6b: same but with v6b pass
-        self.hierfuzz_v6b_export_script = os.path.join(self.directory, "hierfuzz_v6b_export.tcl")
-        if not os.path.exists(self.hierfuzz_v6b_export_script):
-            script = (
-                f'yosys "read_rtlil ../host.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v6b"\n'
-                f'yosys "write_verilog host.v"\n'
-            )
-            with open(self.hierfuzz_v6b_export_script, 'w') as f:
-                f.write(script)
-
-        self.hierfuzz_v6b_ref_export = os.path.join(self.directory, "hierfuzz_v6b_ref_export.tcl")
-        if not os.path.exists(self.hierfuzz_v6b_ref_export):
-            script = (
-                f'yosys "read_rtlil ../reference.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v6b"\n'
-                f'yosys "write_verilog reference.v"\n'
-            )
-            with open(self.hierfuzz_v6b_ref_export, 'w') as f:
-                f.write(script)
-
-        # no_cov: still instrument with hierfuzz_instrument_v6a for port compatibility
-        # with DifuzzRTL receptor (io_covSum, metaReset, metaAssert).
-        # Coverage guidance is disabled via NO_GUIDE=1 in the fuzzer, not by skipping the pass.
+        # no_cov: instrument with data_bucket (was v6a) for DifuzzRTL receptor
+        # port compatibility (io_covSum, metaReset, metaAssert).
+        # Coverage guidance is disabled via NO_GUIDE=1 in the fuzzer.
         self.hierfuzz_nocov_export_script = os.path.join(self.directory, "hierfuzz_nocov_export.tcl")
         if not os.path.exists(self.hierfuzz_nocov_export_script):
             script = (
                 f'yosys "read_rtlil ../host.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v6a"\n'
+                f'yosys "hierfuzz_instrument_data_bucket"\n'
                 f'yosys "write_verilog host.v"\n'
             )
             with open(self.hierfuzz_nocov_export_script, 'w') as f:
@@ -401,32 +403,39 @@ class Host:
         if not os.path.exists(self.hierfuzz_nocov_ref_export):
             script = (
                 f'yosys "read_rtlil ../reference.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v6a"\n'
+                f'yosys "hierfuzz_instrument_data_bucket"\n'
                 f'yosys "write_verilog reference.v"\n'
             )
             with open(self.hierfuzz_nocov_ref_export, 'w') as f:
                 f.write(script)
 
-        # v7: dynamic hash sizing + extmodule proxy + raised caps
-        self.hierfuzz_v7_export_script = os.path.join(self.directory, "hierfuzz_v7_export.tcl")
-        if not os.path.exists(self.hierfuzz_v7_export_script):
-            script = (
-                f'yosys "read_rtlil ../host.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v7"\n'
-                f'yosys "write_verilog host.v"\n'
-            )
-            with open(self.hierfuzz_v7_export_script, 'w') as f:
-                f.write(script)
-
-        self.hierfuzz_v7_ref_export = os.path.join(self.directory, "hierfuzz_v7_ref_export.tcl")
-        if not os.path.exists(self.hierfuzz_v7_ref_export):
-            script = (
-                f'yosys "read_rtlil ../reference.rtlil"\n'
-                f'yosys "hierfuzz_instrument_v7"\n'
-                f'yosys "write_verilog reference.v"\n'
-            )
-            with open(self.hierfuzz_v7_ref_export, 'w') as f:
-                f.write(script)
+        # Legacy variants — still buildable via their original Yosys pass names
+        # for reproducibility of historical experiments. The attributes stay on
+        # the host's old `hierfuzz_v<n>_*` names so legacy DUT classes still work.
+        legacy_variants = ("v7", "v11a", "v12a", "v12b")
+        for v in legacy_variants:
+            host_attr = f"hierfuzz_{v}_export_script"
+            ref_attr  = f"hierfuzz_{v}_ref_export"
+            host_path = os.path.join(self.directory, f"hierfuzz_{v}_export.tcl")
+            ref_path  = os.path.join(self.directory, f"hierfuzz_{v}_ref_export.tcl")
+            setattr(self, host_attr, host_path)
+            setattr(self, ref_attr,  ref_path)
+            if not os.path.exists(host_path):
+                script = (
+                    f'yosys "read_rtlil ../host.rtlil"\n'
+                    f'yosys "hierfuzz_instrument_{v}"\n'
+                    f'yosys "write_verilog host.v"\n'
+                )
+                with open(host_path, 'w') as f:
+                    f.write(script)
+            if not os.path.exists(ref_path):
+                script = (
+                    f'yosys "read_rtlil ../reference.rtlil"\n'
+                    f'yosys "hierfuzz_instrument_{v}"\n'
+                    f'yosys "write_verilog reference.v"\n'
+                )
+                with open(ref_path, 'w') as f:
+                    f.write(script)
 
         # v9a: latest hierCov variant (current best alongside v6a/v6b)
         self.hierfuzz_v9a_export_script = os.path.join(self.directory, "hierfuzz_v9a_export.tcl")

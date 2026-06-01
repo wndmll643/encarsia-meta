@@ -1,4 +1,11 @@
+"""HierFuzz v11b coverage variant.
+
+Uses hierfuzz_instrument_ctrl_bucket_tree Yosys pass for coverage instrumentation.
+See encarsia-yosys passes for the exact instrumentation semantics.
+"""
+
 import os
+import signal
 import subprocess
 import random
 import string
@@ -9,9 +16,9 @@ from host import Host
 from bug import Bug
 
 
-class HierFuzzV6bDUT():
+class HierFuzzCtrlBucketTreeDUT():
     def __init__(self, host: Host, bug: Bug):
-        self.directory = os.path.join(bug.directory, "hierfuzz_v6b")
+        self.directory = os.path.join(bug.directory, "hierfuzz_ctrl_bucket_tree")
         os.makedirs(self.directory, exist_ok=True)
         self.host = host
         self.bug = bug
@@ -24,20 +31,24 @@ class HierFuzzV6bDUT():
             f":/encarsia-difuzz-rtl/Fuzzer/src"
             f":/encarsia-difuzz-rtl/Fuzzer/RTLSim/src"
         )
+        # v11/v12: route the cocotb harness through HierRTLhostTotal
+        # so it reads io_hierCovSumTotal instead of io_hierCovSum.
+        self.env["HIER_COV_TOTAL"] = "1"
         self.env["COCOTB_RESULTS_FILE"] = os.path.join(defines.HIERFUZZ_FUZZER, "cocotb_results", self.name)
+        os.makedirs(os.path.dirname(self.env["COCOTB_RESULTS_FILE"]), exist_ok=True)
         self.compile_failed = False
 
     def create_dut(self):
         host_rtlil = os.path.join(self.bug.directory, "host.rtlil")
         if not os.path.exists(host_rtlil):
             self.compile_failed = True
-            print(f"Warning: skipping hierfuzz_v6b for bug {self.bug.name} (no host.rtlil)")
+            print(f"Warning: skipping hierfuzz_ctrl_bucket_tree for bug {self.bug.name} (no host.rtlil)")
             return self
 
         self.module = os.path.join(self.directory, "host.v")
         if not os.path.exists(self.module):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6b_export_script],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_bucket_tree_export_script],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -59,7 +70,7 @@ class HierFuzzV6bDUT():
         self.reference = os.path.join(self.directory, "reference.v")
         if not os.path.exists(self.reference):
             subprocess.run(
-                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_v6b_ref_export],
+                [defines.YOSYS_PATH, '-c', self.host.hierfuzz_ctrl_bucket_tree_ref_export],
                 check=True,
                 cwd=self.directory,
                 stdout=subprocess.DEVNULL
@@ -108,27 +119,39 @@ class HierFuzzV6bDUT():
         if self.compile_failed:
             return self
         self.fuzz_log = os.path.join(self.directory, "fuzz.log")
+        ts_path = os.path.join(self.directory, "fuzz_start.timestamp")
         if not os.path.exists(self.fuzz_log):
-            with open(self.fuzz_log, 'w') as fuzz_log:
-                process = subprocess.Popen(
-                    [
-                        "make",
-                        "MODULE=hierfuzz_entry",
-                        f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
-                        f"VERILOG_SOURCES={self.dut_path}",
-                        f"VERILOG_FILE={self.dut_path}",
-                        f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
-                        f"NUM_ITER=10000000",
-                        f"RECORD=1",
-                        f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
-                    ],
-                    cwd=defines.HIERFUZZ_FUZZER,
-                    stdout=fuzz_log,
-                    stderr=subprocess.DEVNULL,
-                    env=self.env
-                )
-                time.sleep(defines.FUZZING_TIMEOUT)
-                process.terminate()
+            self.fuzz_start_time = time.time()
+            with open(ts_path, 'w') as f:
+                f.write(str(self.fuzz_start_time))
+            process = subprocess.Popen(
+                [
+                    "make",
+                    "MODULE=hierfuzz_entry",
+                    f"SIM_BUILD={os.path.relpath(self.build_directory, defines.HIERFUZZ_FUZZER)}",
+                    f"VERILOG_SOURCES={self.dut_path}",
+                    f"VERILOG_FILE={self.dut_path}",
+                    f"TOPLEVEL={self.host.config.difuzzrtl_toplevel}",
+                    f"NUM_ITER=10000000",
+                    f"RECORD=1",
+                    f"OUT={os.path.relpath(self.out_directory, defines.HIERFUZZ_FUZZER)}"
+                ],
+                cwd=defines.HIERFUZZ_FUZZER,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=self.env,
+                preexec_fn=os.setsid
+            )
+            time.sleep(defines.FUZZING_TIMEOUT)
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            process.wait()
+            open(self.fuzz_log, 'w').close()
+        else:
+            if os.path.exists(ts_path):
+                with open(ts_path, 'r') as f:
+                    self.fuzz_start_time = float(f.read().strip())
+            else:
+                self.fuzz_start_time = None
 
         return self
 
@@ -195,8 +218,14 @@ class HierFuzzV6bDUT():
 
             with open(log, 'r') as log_file:
                 if "Bug --" not in log_file.read():
+                    ttb_str = ""
+                    if hasattr(self, 'fuzz_start_time') and self.fuzz_start_time is not None:
+                        mismatch_path = os.path.join(self.out_directory, 'mismatch', 'sim_input', input)
+                        if os.path.exists(mismatch_path):
+                            ttb = os.path.getmtime(mismatch_path) - self.fuzz_start_time
+                            ttb_str = f" TTB: {ttb:.1f}"
                     with open(self.check_summary, 'w') as check_summary_file:
-                        check_summary_file.write("DETECTED: " + input)
+                        check_summary_file.write("DETECTED: " + input + ttb_str)
                     return self
 
         with open(self.check_summary, 'w') as check_summary_file:
