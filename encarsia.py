@@ -21,6 +21,9 @@ from fuzzers.hierfuzz_ctrl_bucket_dut import HierFuzzCtrlBucketDUT
 from fuzzers.hierfuzz_data_bucket_pfuzz_dut import HierFuzzDataBucketPfuzzDUT
 from fuzzers.hierfuzz_ctrl_fold_dut import HierFuzzCtrlFoldDUT
 from fuzzers.hierfuzz_ctrl_fold_pfuzz_dut import HierFuzzCtrlFoldPfuzzDUT
+# Standalone tree variants (HierFuzz drop-in; NOT coupled to ProcessorFuzz)
+from fuzzers.hierfuzz_data_bucket_tree_dut import HierFuzzDataBucketTreeDUT
+from fuzzers.hierfuzz_ctrl_bucket_tree_dut import HierFuzzCtrlBucketTreeDUT
 # Phase B: hierCov-gated ProcessorFuzz hybrids
 from fuzzers.hierfuzz_data_bucket_pfuzz_hcov_dut import HierFuzzDataBucketPfuzzHcovDUT
 from fuzzers.hierfuzz_ctrl_bucket_tree_pfuzz_hcov_dut import HierFuzzCtrlBucketTreePfuzzHcovDUT
@@ -238,6 +241,46 @@ if __name__ == "__main__":
                         duts = verifier_pool.map(HierFuzzCtrlBucketDUT.compile_reference, duts)
                         print("Filtering false positives")
                         duts = verifier_pool.map(HierFuzzCtrlBucketDUT.check_mismatch, duts)
+                        subprocess.run(["stty", "echo"])
+                        plot.save_fuzzing_results(host, fuzzer, duts)
+                    elif fuzzer == "hierfuzz_data_bucket_tree":
+                        if host.name in ["ibex", "cva6"]:
+                            print(f"HierFuzz does not support {host.name}, skipping!")
+                            continue
+                        print(f"Fuzzing {host.name} with HierFuzz data_bucket_tree")
+                        duts = [HierFuzzDataBucketTreeDUT(host, bug) for bug in bugs]
+                        print("Encapsulating buggy designs in wrapper modules for compatibility with the fuzzer")
+                        duts = verifier_pool.map(HierFuzzDataBucketTreeDUT.create_dut, duts)
+                        print("Compiling buggy designs for RTL simulation")
+                        duts = verifier_pool.map(HierFuzzDataBucketTreeDUT.compile_dut, duts)
+                        print("Fuzzing")
+                        duts = verifier_pool.map(HierFuzzDataBucketTreeDUT.fuzz, duts)
+                        print("Encapsulating reference designs in wrapper modules for compatibility with the fuzzer")
+                        duts = verifier_pool.map(HierFuzzDataBucketTreeDUT.create_reference, duts)
+                        print("Compiling reference designs for RTL simulation")
+                        duts = verifier_pool.map(HierFuzzDataBucketTreeDUT.compile_reference, duts)
+                        print("Filtering false positives")
+                        duts = verifier_pool.map(HierFuzzDataBucketTreeDUT.check_mismatch, duts)
+                        subprocess.run(["stty", "echo"])
+                        plot.save_fuzzing_results(host, fuzzer, duts)
+                    elif fuzzer == "hierfuzz_ctrl_bucket_tree":
+                        if host.name in ["ibex", "cva6"]:
+                            print(f"HierFuzz does not support {host.name}, skipping!")
+                            continue
+                        print(f"Fuzzing {host.name} with HierFuzz ctrl_bucket_tree")
+                        duts = [HierFuzzCtrlBucketTreeDUT(host, bug) for bug in bugs]
+                        print("Encapsulating buggy designs in wrapper modules for compatibility with the fuzzer")
+                        duts = verifier_pool.map(HierFuzzCtrlBucketTreeDUT.create_dut, duts)
+                        print("Compiling buggy designs for RTL simulation")
+                        duts = verifier_pool.map(HierFuzzCtrlBucketTreeDUT.compile_dut, duts)
+                        print("Fuzzing")
+                        duts = verifier_pool.map(HierFuzzCtrlBucketTreeDUT.fuzz, duts)
+                        print("Encapsulating reference designs in wrapper modules for compatibility with the fuzzer")
+                        duts = verifier_pool.map(HierFuzzCtrlBucketTreeDUT.create_reference, duts)
+                        print("Compiling reference designs for RTL simulation")
+                        duts = verifier_pool.map(HierFuzzCtrlBucketTreeDUT.compile_reference, duts)
+                        print("Filtering false positives")
+                        duts = verifier_pool.map(HierFuzzCtrlBucketTreeDUT.check_mismatch, duts)
                         subprocess.run(["stty", "echo"])
                         plot.save_fuzzing_results(host, fuzzer, duts)
                     elif fuzzer == "hierfuzz_data_bucket_pfuzz":
